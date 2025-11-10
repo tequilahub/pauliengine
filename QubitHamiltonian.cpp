@@ -249,7 +249,7 @@ class QubitHamiltonian {
 
 };
 
-NB_MODULE(pauliArithmetic, m) {
+NB_MODULE(pauliEngine, m) {
         nb::class_<PauliString<>>(m, "PauliString", "Represents a Pauli string in binary symplectic form.")
                 .def(nb::init<>(), "Default constructor.")
                 .def(nb::init<const std::unordered_map<int, std::string>&, std::complex<double>>(),

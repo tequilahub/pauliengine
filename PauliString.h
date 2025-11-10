@@ -348,14 +348,15 @@ class PauliString {
                         while (tau < 0) {
                                 tau += 4;
                         }
+                        
+                        if (tau % 2 == 0) {
+                                return PauliString(new_x, new_y, 0);
+                        }
                         for (int i = 0; i < tau % 4; i++) {
                                 coeff_new *= Unit_matrix;
                         }
-                        PauliString output = PauliString(new_x, new_y,  coeff_temp * (coeff_new * 2.0));
-                        if (tau == 0) {
-                                output.is_zero = true;
-                        }
-                        return output;
+                        return PauliString(new_x, new_y,  coeff_temp * (coeff_new * 2.0));
+                        
                 }
 
                 Coeff get_coeff() {
