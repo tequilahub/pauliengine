@@ -371,6 +371,14 @@ class PauliString {
                         #endif
                 }
 
+                void set_coeff(SymEngine::Expression new_coeff) {
+                        this->coeff = new_coeff;
+                }
+
+                void set_coeff(std::complex<double> new_coeff) {
+                        this->coeff = new_coeff;
+                }
+
                 PauliString trace_out_qubits(const std::vector<int>& qubits, const std::vector<int>& state) {
                         double factor = 1.0;
                         std::vector<uint64_t> x_y(this->x.size());
@@ -491,7 +499,7 @@ class PauliString {
                 }
 
                 bool equals(const PauliString& other) {
-                        return this->x == other.x && this->y == other.y && this->coeff == other.coeff;
+                        return this->x == other.x && this->y == other.y && ::to_complex(this->coeff) == ::to_complex(other.coeff);
                 }
 
                 
@@ -519,7 +527,7 @@ inline int popcount(uint64_t x) {
         return count;
 }
 
-static std::complex<double> to_complex(const Expression &expr) {
+std::complex<double> to_complex(const Expression &expr) {
     const auto &basic = *expr.get_basic();
 
     if (is_a<RealDouble>(basic)) {

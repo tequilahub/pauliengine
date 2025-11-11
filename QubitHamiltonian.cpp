@@ -270,6 +270,9 @@ NB_MODULE(PauliEngine, m) {
                 .def("__eq__", &PauliString<>::equals, "Checks equality.")
                 .def("diff", &PauliString<>::key_openfermion, "Returns Paulistring in Openfermion format")
                 .def("qubits", &PauliString<>::qubits, "Returns list of qubits")
+                .def("equals", &PauliString<>::operator==, "Checks if 2 PauliStrings have same data and Coefficient")
+                .def("set_coeff", nb::overload_cast<SymEngine::Expression>(&PauliString<>::set_coeff), "Sets coefficient using a SymEngine expression")
+                .def("set_coeff", nb::overload_cast<std::complex<double>>(&PauliString<>::set_coeff), "Sets coefficient using a complex number")
                 .def("get_pauli_at_index", &PauliString<>::get_pauli_from_index, "Returns list of qubits");
 
         nb::class_<QubitHamiltonian>(m, "QubitHamiltonian", "Represents a Hamiltonian as a sum of Pauli strings.")
@@ -287,7 +290,7 @@ NB_MODULE(PauliEngine, m) {
                 .def("parse_python_format", &QubitHamiltonian::parse_python_format, "Konvertiert mit SymEngine-Koeffizienten");
 
                 
-        m.def("to_complex", &to_complex, "Parse Symengine expression into complex number");
+        m.def("to_complex", &to_complex, "Parse SymEngine expression into complex number");
 
         nb::class_<SymEngine::Expression>(m, "Expression")
                 .def(nb::init<const std::string&>())  // Konstruktor aus String
