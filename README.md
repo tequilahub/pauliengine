@@ -19,10 +19,11 @@ Before you begin, make sure you have the following installed:
 - **Python** (for installing Conan)
 
 ---
-
+```bash
 ##  Step 1: Install Conan
 
 Install Conan via `pip`:
+
 
 pip install conan
 ---
