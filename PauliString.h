@@ -499,7 +499,31 @@ class PauliString {
                 }
 
                 bool equals(const PauliString& other) {
-                        return this->x == other.x && this->y == other.y && ::to_complex(this->coeff) == ::to_complex(other.coeff);
+                        return this->x == other.x && this->y == other.y && PauliString::to_complex(this->coeff) == PauliString::to_complex(other.coeff);
+                }
+
+                static std::complex<double> to_complex(const Expression &expr) {
+                        const auto &basic = *expr.get_basic();
+
+                        if (is_a<RealDouble>(basic)) {
+                                const auto &rd = down_cast<const RealDouble &>(basic);
+                                return { rd.as_double(), 0.0 };
+                        } 
+                        else if (is_a<ComplexDouble>(basic)) {
+                                const auto &cd = down_cast<const ComplexDouble &>(basic);
+                                return {
+                                eval_double(*cd.real_part()),
+                                eval_double(*cd.imaginary_part())
+                                };
+                        } 
+                        else {
+                                try {
+                                double val = eval_double(basic);
+                                return { val, 0.0 };
+                                } catch (...) {
+                                throw std::runtime_error("Expression cannot be converted to std::complex<double>.");
+                                }
+                        }
                 }
 
                 
