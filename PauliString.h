@@ -498,6 +498,10 @@ class PauliString {
                         #endif
                 }
 
+                PauliString copy() const{
+                        return PauliString(this->x, this->y, this->coeff);
+                }
+
                 bool equals(const PauliString& other) {
                         return this->x == other.x && this->y == other.y && PauliString::to_complex(this->coeff) == PauliString::to_complex(other.coeff);
                 }

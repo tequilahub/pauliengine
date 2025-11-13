@@ -276,6 +276,7 @@ NB_MODULE(PauliEngine, m) {
                 .def("set_coeff", nb::overload_cast<SymEngine::Expression>(&PauliString<>::set_coeff), "Sets coefficient using a SymEngine expression")
                 .def("set_coeff", nb::overload_cast<std::complex<double>>(&PauliString<>::set_coeff), "Sets coefficient using a complex number")
                 .def_static("to_complex", &PauliString<>::to_complex, "Parse SymEngine expression into complex number")
+                .def("copy", &PauliString<>::copy, "Create a copy of the PauliString")
                 .def("get_pauli_at_index", &PauliString<>::get_pauli_from_index, "Returns list of qubits");
 
         nb::class_<QubitHamiltonian>(m, "QubitHamiltonian", "Represents a Hamiltonian as a sum of Pauli strings.")
