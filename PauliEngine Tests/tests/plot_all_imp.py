@@ -9,8 +9,10 @@ from pauliarray import PauliArray
 import pennylane as qml
 
 
+
+
 import numpy as np
-from pauliarray import PauliArray, WeightedPauliArray
+from pauliarray import PauliArray, WeightedPauliArray, Operator
 
 
 
@@ -21,35 +23,9 @@ def generate_pauliarray_hamiltonian(size, pauli_length):
     z = np.random.randint(0, 2, size=(size, pauli_length), dtype=bool)
     x = np.random.randint(0, 2, size=(size, pauli_length), dtype=bool)
     paulis = PauliArray(z, x)
-    return WeightedPauliArray(paulis, coeffs)
-
-def multiply_all_pairs(pauliarray1: WeightedPauliArray, pauliarray2: WeightedPauliArray) -> WeightedPauliArray:
-    
-    n1 = pauliarray1.size
-    n2 = pauliarray2.size
-    pauli_length = pauliarray1.num_qubits
+    return Operator(WeightedPauliArray(paulis, coeffs))
 
 
-    z1_expanded = np.repeat(pauliarray1.paulis.z_strings, n2, axis=0)
-    x1_expanded = np.repeat(pauliarray1.paulis.x_strings, n2, axis=0)
-    coeffs1_expanded = np.repeat(pauliarray1._weights, n2, axis=0)
-
-    z2_expanded = np.tile(pauliarray2.paulis.z_strings, (n1, 1))
-    x2_expanded = np.tile(pauliarray2.paulis.x_strings, (n1, 1))
-    coeffs2_expanded = np.tile(pauliarray2._weights, n1)
-
-
-    pauli1_exp = PauliArray(z1_expanded, x1_expanded)
-    pauli2_exp = PauliArray(z2_expanded, x2_expanded)
-
-
-    composed_paulis, phases = pauli1_exp.compose_pauli_array(pauli2_exp)
-
-
-    new_coeffs = coeffs1_expanded * coeffs2_expanded * phases
-
-
-    return WeightedPauliArray(composed_paulis, new_coeffs)
 
 
 def multiply_pauliarrays(a, b):
@@ -59,7 +35,7 @@ def multiply_pauliarrays(a, b):
     print("####B####")
     print(b.inspect())
     '''
-    result = a.compose_weighted_pauli_array( b)
+    result = a * b
     '''
     print("RESULT")
     print(result.inspect())
@@ -159,7 +135,7 @@ def benchmark_vs_size(sizes, fixed_other, generator_fn, operation_fn, plot_name,
     for size in sizes:
         start_total = time.time()
         
-        # Zeit messen: Erstellen der Daten
+
         start_create = time.time()
         if fixed_type == "pauli_length":
             h1 = generator_fn(size, fixed_other)
@@ -168,12 +144,6 @@ def benchmark_vs_size(sizes, fixed_other, generator_fn, operation_fn, plot_name,
             h1 = generator_fn(fixed_other, size)
             h2 = generator_fn(fixed_other, size)
         
-        # Spezielle Behandlung für PauliArray: alle Paare multiplizieren
-        if generator_fn.__name__ == "generate_pauliarray_hamiltonian":
-            h1_copy = h1.copy()
-            h2_copy = h2.copy()
-            h1 = multiply_all_pairs(h1_copy, h2_copy)
-            h2 = multiply_all_pairs(h2_copy, h1_copy)
         end_create = time.time()
         
         # Zeit messen: Operation ausführen
@@ -187,7 +157,7 @@ def benchmark_vs_size(sizes, fixed_other, generator_fn, operation_fn, plot_name,
         op_time = end_op - start_op
         total_time = end_total - start_total
         
-        times.append(total_time)
+        times.append(op_time)
         
         if plot_name not in testing:
             testing.append(plot_name)
@@ -219,7 +189,7 @@ def plot_results(x_values, *curves, xlabel, title, labels=None):
 
 
 
-hamiltonian_sizes = [300, 600, 900, 1200, 1500, 1800]
+hamiltonian_sizes = range(500, 5100, 500)
 pauli_lengths = [100, 300, 500]
 fixed_hamiltonian_size = 300
 fixed_pauli_length = 300
@@ -321,7 +291,7 @@ plot_results(
     title=f"Runtime vs Hamiltonian-Size (fix Pauli length = {fixed_pauli_length})",
     labels=testing
 )
-
+'''
 plt.subplot(1, 2, 2)
 plot_results(
     pauli_lengths,
@@ -330,6 +300,6 @@ plot_results(
     title=f"Runtime vs Pauli string size (fix H size = {fixed_hamiltonian_size})",
     labels=testing
 )
-
+'''
 plt.tight_layout()
 plt.show()
