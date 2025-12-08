@@ -1,4 +1,15 @@
-# SymEngine Installation and Build Guide 
+# Status: Beta
+
+This project is currently in **beta**. Some features are incomplete or still under development.  
+The following items are planned or not yet fully implemented:
+
+-   A detailed online Documentation of PauliEngines functionality.
+    
+-   Installation via pip.
+    
+-   A comprehensive test suite.
+
+# Installation and Build Guide 
 
   
 
@@ -106,18 +117,6 @@ This file can now be used in any Python project, and its functionality can be ac
  import PauliEngine
 ```
 
-### Status: Beta
 
-This project is currently in **beta**. Some features are incomplete or still under development.  
-The following items are planned or not yet fully implemented:
-
--   A detailed online Documentation of PauliEngines functionality.
-    
--   Installation via pip.
-    
--   A comprehensive test suite.
- 
- ---
- Performance may vary in future Versions
 
 
