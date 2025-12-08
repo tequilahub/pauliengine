@@ -1,4 +1,4 @@
-# Status: Beta
+# PauliEngine: Fast Arithmetics for Quantum Operators
 
 This project is currently in **beta**. Some features are incomplete or still under development.  
 The following items are planned or not yet fully implemented:
@@ -8,6 +8,48 @@ The following items are planned or not yet fully implemented:
 -   Installation via pip.
     
 -   A comprehensive test suite.
+
+# Example I 
+
+### Operator Construction
+```python
+import pauliengine as pe
+# Example : Z on qubit 0 with coefficient 1.0
+p1 = pe.PauliString ((1.0, {0: "Z"}))
+
+# Example : X on qubit 1 with coefficient "a" ( symbolic )
+p2 = pe.PauliString (("a", {1: "X"}))
+
+# Example : OpenFermion style
+p3 = pe.PauliString ((1.0, [("X", 0), ("Y", 2) ]))
+```
+### Standard Operations
+```python
+# Addition:
+p4 = p2 + p3
+# Multiplication
+p5 = p4 * p1
+# fast commutators
+c = p1.commutator(p2)
+```
+
+### Parametrized Operators
+```python
+# create PauliString objects
+p1 = pe.PauliString ((1.0 , {0: "Z"})) # not parametrized
+p2 = pe.PauliString (("a", {1: "X"}))  # parametrized
+# assemble operator
+H = QubitHamiltonian([p1 , p2 ])
+```
+In beta version, mixed types need to be created like this (create atomic PauliStrings, then assemble operator)
+
+### Operations on Parametrized Operators
+```python
+# Differentiate
+dH = H.diff ("a")
+# Substitute
+H2 = H.subs ({"a": 2.0})
+```
 
 # Installation and Build Guide 
 
