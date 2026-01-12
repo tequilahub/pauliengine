@@ -21,27 +21,5 @@ endif()
 # Conan Toolchain einbinden (nach: conan install .. --install-folder=build --build=missing)
 include(${CMAKE_BINARY_DIR}/conan_toolchain.cmake OPTIONAL RESULT_VARIABLE _found)
 
-# Python & SymEngine
-find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
-find_package(SymEngine REQUIRED CONFIG)
+add_subdirectory(src)
 
-# Nanobind einbinden
-add_subdirectory(nanobind)
-
-# Header-only Bibliothek definieren
-add_library(pauli_string INTERFACE)
-target_include_directories(pauli_string INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-
-if (SymEngine_FOUND)
-    target_compile_definitions(pauli_string INTERFACE HAVE_SYMENGINE)
-    target_link_libraries(pauli_string INTERFACE symengine)
-endif()
-
-# Python-Modul erstellen
-nanobind_add_module(PauliEngine 
-    QubitHamiltonian.cpp 
-)
-
-target_link_libraries(PauliEngine PRIVATE 
-    pauli_string
-)

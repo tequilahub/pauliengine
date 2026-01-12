@@ -6,10 +6,10 @@
 #include <nanobind/stl/map.h>
 #include <nanobind/stl/pair.h>
 
+#include "../QubitHamiltonian.cpp"
 
 
 namespace nb = nanobind;
-
 
 
 NB_MODULE(PauliEngine, m) {

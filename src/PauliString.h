@@ -28,9 +28,6 @@ inline int popcount(uint64_t x);
 void testSymengine();
 
 
-
-
-
 template<typename Coeff = CoeffType>
 class PauliString {
         public:

@@ -1,0 +1,30 @@
+#pragma once
+
+#include <map>
+#include <string>
+#include <string_view>
+
+namespace PauliEngine {
+static constexpr auto version() noexcept -> std::string_view {
+    return "@PROJECT_VERSION_FULL@";
+}
+
+static constexpr auto git_commit() noexcept -> std::string_view {
+    return "@GIT_COMMIT@";
+}
+
+static constexpr auto build_type() noexcept -> std::string_view {
+    return "@CMAKE_BUILD_TYPE@";
+}
+
+static auto compiler_flags() noexcept -> std::map<std::string, std::string> {
+    return {
+        {"from-environment", "@CMAKE_CXX_FLAGS@"},
+        {"build-type-flags", "@_cmake_build_type_specific_flags@"},
+        {"vectorization", "@ARCH_FLAG@"},
+        {"project-defaults", "@CMAKE_CXX20_STANDARD_COMPILE_OPTION@ @PauliEngine_CXX_FLAGS@"},
+        {"user-appended", "@EXTRA_CXXFLAGS@"},
+        {"openmp-parallelization", "@OpenMP_CXX_FLAGS@"},
+    };
+}
+} // namespace PauliEngine
