@@ -12,7 +12,7 @@
 namespace nb = nanobind;
 
 
-NB_MODULE(PauliEngine, m) {
+NB_MODULE(_core, m) {
         nb::class_<PauliString<>>(m, "PauliString", "Represents a Pauli string in binary symplectic form.")
                 .def(nb::init<>(), "Default constructor.")
                 .def(nb::init<const std::unordered_map<int, std::string>&, std::complex<double>>(),

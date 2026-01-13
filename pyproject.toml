@@ -3,7 +3,7 @@ requires = ["nanobind", "scikit-build-core>=0.11", "setuptools-scm>=8"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "PauliEngine"
+name = "pauliengine"
 
 description = "TDA."
 readme = "README.md"
@@ -28,8 +28,6 @@ dynamic = ["version"]
 dependencies = [
   "numpy",
 ]
-
-
 
 [dependency-groups]
 test = ["pytest>=8.2.2,<9.0", "pytest-datadir"]
@@ -91,13 +89,13 @@ sdist.exclude = [
   "sandbox",
   "tests/cpp",
 ]
-sdist.include = ["src/PauliEngine/_version.py"]
+sdist.include = ["src/pauliengine/_version.py"]
 build.verbose = true
 build.tool-args = ["-j8"]
 
 
 [tool.setuptools_scm]
-write_to = "src/PauliEngine/_version.py"
+write_to = "src/pauliengine/_version.py"
 
 
 [tool.pytest.ini_options]
@@ -118,12 +116,12 @@ testpaths = ["tests"]
 required_plugins = ["pytest-datadir"]
 
 [tool.coverage]
-run.source = ["src/PauliEngine"]
+run.source = ["src/pauliengine"]
 relative_files = true
-omit = ["src/PauliEngine/_version.py"]
+omit = ["src/pauliengine/_version.py"]
 
 [tool.coverage.report]
-omit = ["src/PauliEngine/_version.py"]
+omit = ["src/pauliengine/_version.py"]
 exclude_also = [
   '\.\.\.',
   "def __repr__",
@@ -148,7 +146,7 @@ exclude_also = [
 [tool.ruff]
 # for the default settings, see: https://docs.astral.sh/ruff/configuration/#configuring-ruff
 
-exclude = ["docs", "src/PauliEngine/_version.py", "tools/container"]
+exclude = ["docs", "src/pauliengine/_version.py", "tools/container"]
 
 target-version = "py311"
 
@@ -245,7 +243,7 @@ flake8-annotations.allow-star-arg-any = true
 # - I002 (isort required import)
 "tests/**/test_*.py" = ["ANN", "I002"]
 # ignore I002 (isort required import) for all `__init__.py` files
-"src/PauliEngine/**/__init__.py" = ["I002"]
+"src/pauliengine/**/__init__.py" = ["I002"]
 
 [tool.ruff.lint.pycodestyle]
 # maximum line length to allow for line-length violations within documentation,
@@ -263,7 +261,7 @@ required-imports = ["from __future__ import annotations"]
 [tool.pyright]
 pythonVersion = "3.11"
 
-include = ["src/PauliEngine/**/*.py"]
+include = ["src/pauliengine/**/*.py"]
 
 exclude = ["test_*.py", "docs/**", "**/__pycache__", "tools/container/**"]
 
