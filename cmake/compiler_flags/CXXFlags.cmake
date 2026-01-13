@@ -17,7 +17,7 @@
 #   ``Clang.CXX.cmake``, and ``Intel.CXX.cmake`` files.
 # - ``ARCH_FLAG`` is the architecture-dependent optimization flag, *e.g.*
 #   vectorization. Default is empty.
-# - ``pauliengine_CXX_FLAGS`` are tinite-lite-specific flags to be used for all builds.
+# - ``pauliengine_CXX_FLAGS`` are PAULIENGINE-lite-specific flags to be used for all builds.
 #   The defaults are compiler-dependent: have a look at the ``GNU.CXX.cmake``,
 #   ``Clang.CXX.cmake``, and ``Intel.CXX.cmake`` files.
 # - ``EXTRA_CXXFLAGS`` useful if you need to append certain flags to the full
@@ -26,7 +26,7 @@
 #
 # Variables used::
 #
-#   TINITE_ENABLE_ARCH_FLAGS
+#   PAULIENGINE_ENABLE_ARCH_FLAGS
 #   EXTRA_CXXFLAGS
 #
 # Variables modified::
@@ -37,7 +37,7 @@
 #
 #   CXXFLAGS
 
-option_with_print(TINITE_ENABLE_ARCH_FLAGS "Enable architecture-specific compiler flags" ON)
+option_with_print(PAULIENGINE_ENABLE_ARCH_FLAGS "Enable architecture-specific compiler flags" ON)
 
 # code needs C++20 at least
 set(CMAKE_CXX_STANDARD 20)
@@ -53,7 +53,7 @@ set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
 set(CMAKE_VISIBILITY_INLINES_HIDDEN TRUE)
 
 set(ARCH_FLAG "")
-if(TINITE_ENABLE_ARCH_FLAGS AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+if(PAULIENGINE_ENABLE_ARCH_FLAGS AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
   if(CMAKE_CXX_COMPILER_ID MATCHES GNU)
     set(ARCH_FLAG "-march=native")
   endif()
