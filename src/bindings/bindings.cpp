@@ -7,12 +7,18 @@
 #include <nanobind/stl/pair.h>
 
 #include "../QubitHamiltonian.cpp"
-
+#include "pauliengine/Info.h"
 
 namespace nb = nanobind;
+using namespace pauliengine;
 
 
 NB_MODULE(_core, m) {
+
+        m.doc() = "PauliEngine";
+        m.attr("__build_type__") = std::string(build_type());
+        m.attr("__compiler_flags__") = compiler_flags();
+        
         nb::class_<PauliString<>>(m, "PauliString", "Represents a Pauli string in binary symplectic form.")
                 .def(nb::init<>(), "Default constructor.")
                 .def(nb::init<const std::unordered_map<int, std::string>&, std::complex<double>>(),
