@@ -28,7 +28,7 @@ if (SymEngine_FOUND)
     target_compile_definitions(pauliengine-objs PUBLIC HAVE_SYMENGINE)
     endif()
     
-  target_link_libraries(pauliengine-objs PUBLIC symengine)
+  target_link_libraries(pauliengine-objs PUBLIC symengine gmp)
 
 
 
@@ -49,6 +49,7 @@ if(DEFINED SKBUILD)
   add_subdirectory(bindings)
 else()
   # if you want to compile some local C++ executable for testing
-  #add_executable(example.x example.cpp)
-  #target_link_libraries(example.x PRIVATE pauliengine-objs)
+  add_executable(example.x example.cpp)
+  target_link_libraries(example.x PUBLIC symengine gmp)
 endif()
+
