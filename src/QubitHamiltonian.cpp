@@ -233,4 +233,3 @@ class QubitHamiltonian {
                 }
 
 };
-
