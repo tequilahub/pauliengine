@@ -60,6 +60,8 @@ NB_MODULE(_core, m) {
                 .def("diff", &QubitHamiltonian::diff, "Differentiation after given Variable")
                 .def("subs", &QubitHamiltonian::substitute, "Replace Variable with value")
                 .def("parse_python_format", &QubitHamiltonian::parse_python_format, "Konvertiert mit SymEngine-Koeffizienten");
+                .def("__str__",&QubitHamiltonian::to_string, "Returns a human-readable string representation of the QubitHamiltonian operator.");
+                .def("__repr__",&QubitHamiltonian::to_string, "Returns a human-readable string representation of the QubitHamiltonian operator.");
 
 
 
