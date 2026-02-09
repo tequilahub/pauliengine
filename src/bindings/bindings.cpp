@@ -6,7 +6,7 @@
 #include <nanobind/stl/map.h>
 #include <nanobind/stl/pair.h>
 
-#include "../QubitHamiltonian.cpp"
+#include "pauliengine/QubitHamiltonian.h"
 #include "pauliengine/Info.h"
 
 namespace nb = nanobind;
