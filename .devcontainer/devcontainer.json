@@ -1,7 +1,8 @@
 {
   "name": "PauliEngine development environment",
   "build": {
-    "dockerfile": "Dockerfile"
+    "dockerfile": "Dockerfile",
+    "context": ".."
   },
   "capAdd": [
     "SYS_PTRACE"

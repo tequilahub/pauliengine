@@ -10,14 +10,13 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     gcc \
     gdb \
     libgmp-dev \
-    ninja-build \
-    && curl -L https://github.com/symengine/symengine/archive/v0.14.0.tar.gz | tar -xz \
-    && rm -f v0.14.0.tar.gz \
-    && cmake -S"symengine-0.14.0" -B"symengine-0.14.0/build" -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -GNinja \
-    && cmake --build "symengine-0.14.0/build" --target install \
-    && rm -rf symengine-0.14.0 \
+    ninja-build
+
+COPY tools/install-deps.sh /usr/local/bin/install-deps.sh
+
+RUN /usr/local/bin/install-deps.sh \
     && apt-get autoremove -y \
     && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=uv --chown=vscode: /uv /uvx /bin/
+COPY --from=uv --chown=vscode /uv /uvx /bin/

@@ -87,17 +87,18 @@ jobs:
           CIBW_BUILD_VERBOSITY: 1
           CIBW_DEBUG_TRACEBACK: TRUE
           CIBW_BEFORE_ALL_LINUX: |
-            # install mold
-            dnf install -y mold
-
-            # install other dependencies
-            # ./tools/install-deps.sh 
+            dnf install -y libgmp-dev
+            # install symengine
+            ./tools/install-deps.sh 
           CIBW_BEFORE_ALL_MACOS: |
-            # brew install libomp 
+            brew install gmp 
+            # install symengine
+            ./tools/install-deps.sh 
           # do not activate architecture-dependent compiler flags
           # 4 jobs in parallel, but do not start new ones if load average exceeds 5
           CIBW_ENVIRONMENT_LINUX: >
             CIBW="true"
+            SKBUILD_BUILD_TOOL_ARGS="-j4;-l5"
           # set deployment target for C++20 compatibility
           # make brew-installed OpenMP discoverable by CMake
           # do not activate architecture-dependent compiler flags
@@ -106,8 +107,8 @@ jobs:
             CIBW="true"
             MACOSX_DEPLOYMENT_TARGET=15.0
             OpenMP_ROOT="$(brew --prefix)/opt/libomp"
-          # build 3.11, 3.12, 3.13 (with GIL), and 3.14 (with GIL)
-          CIBW_BUILD: "cp311-* cp312-* cp313-* cp314-*"
+          # build 3.10, 3.11, 3.12, 3.13 (with GIL), and 3.14 (with GIL)
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
           # skip musl builds, and PyPy builds
           CIBW_SKIP: "*-musllinux_*"
           # use abi3audit to catch issues with Limited API wheels
