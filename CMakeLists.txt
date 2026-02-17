@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.28...3.31)
+cmake_minimum_required(VERSION 3.28...4.2.1)
 
 if(SKBUILD)
   # this value doesn't really matter, as it will be set by scikit-build-core
@@ -64,7 +64,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON CACHE BOOL "C++ standard required")
 set(CMAKE_CXX_EXTENSIONS OFF CACHE BOOL "C++ extensions")
 
 include(${PROJECT_SOURCE_DIR}/cmake/compiler_flags/CXXFlags.cmake)
-include(${PROJECT_SOURCE_DIR}/cmake/custom/math.cmake)
 
 message(STATUS "${PROJECT_NAME} version: ${PROJECT_VERSION_FULL}")
 
