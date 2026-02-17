@@ -88,10 +88,11 @@ jobs:
           CIBW_DEBUG_TRACEBACK: TRUE
           CIBW_BEFORE_ALL_LINUX: |
             dnf install -y gmp gmp-devel ninja-build
+            dnf updagrade cmake
             # install symengine
             ./tools/install-deps.sh 
           CIBW_BEFORE_ALL_MACOS: |
-            brew install gmp-devel
+            # brew install gmp-devel
             # install symengine
             ./tools/install-deps.sh 
           # do not activate architecture-dependent compiler flags
