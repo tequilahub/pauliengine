@@ -22,25 +22,13 @@ target_include_directories(
 )
 
 # find_package(SymEngine REQUIRED CONFIG) 
-find_package(SymEngine REQUIRED CONFIG) 
+find_package(SymEngine CONFIG) 
 
 if (SymEngine_FOUND)
     target_compile_definitions(pauliengine-objs PUBLIC HAVE_SYMENGINE)
-    endif()
-    
-if(APPLE)
-  # GMP is commonly installed via Homebrew on macOS
-  find_package(GMP REQUIRED)
-  include_directories(${GMP_INCLUDE_DIR})
-  # target_link_libraries(pauliengine-objs ${GMP_LIBRARIES})
-  target_include_directories(pauliengine-objs PUBLIC ${GMP_INCLUDE_DIR})
+    target_link_libraries(pauliengine-objs PUBLIC symengine gmp)
 endif()
-
-target_link_libraries(pauliengine-objs PUBLIC symengine gmp)
-
-
-
-
+    
 # flags to prepend
 target_compile_options(
   pauliengine-objs
@@ -58,6 +46,8 @@ if(DEFINED SKBUILD)
 else()
   # if you want to compile some local C++ executable for testing
   add_executable(example.x example.cpp)
-  target_link_libraries(example.x PUBLIC symengine gmp)
+  if (SymEngine_FOUND)
+      target_compile_definitions(example.x PUBLIC HAVE_SYMENGINE)
+  endif()
 endif()
 
