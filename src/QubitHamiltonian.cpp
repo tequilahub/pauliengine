@@ -14,7 +14,7 @@ QubitHamiltonian::QubitHamiltonian(const Hamiltonian_structure& data) {
                         this->data = converted_data;
                 }    
                 
-
+#ifdef HAVE_SYMENGINE
 QubitHamiltonian::QubitHamiltonian(const Hamiltonian_structure_variable& data) {
         std::vector<PauliString<>> converted_data;
         converted_data.reserve(data.size());
@@ -23,6 +23,21 @@ QubitHamiltonian::QubitHamiltonian(const Hamiltonian_structure_variable& data) {
         }
         this->data = converted_data;
 }
+
+QubitHamiltonian QubitHamiltonian::compact() {
+        std::unordered_map<PauliString<>, SymEngine::Expression, PauliStringHash> merged;
+        for (const auto& ps : data) {
+                merged[ps] = merged[ps] + ps.coeff;
+        }
+        data.clear();
+        for (const auto& [ps, coeff] : merged) {
+                PauliString<> new_ps = ps;
+                new_ps.coeff = coeff;
+                data.push_back(new_ps);
+        }
+        return QubitHamiltonian(data);
+}
+#endif
 
 
                 
@@ -48,19 +63,7 @@ std::string QubitHamiltonian::to_string() {
 }
                
 
-QubitHamiltonian QubitHamiltonian::compact() {
-        std::unordered_map<PauliString<>, SymEngine::Expression, PauliStringHash> merged;
-        for (const auto& ps : data) {
-                merged[ps] = merged[ps] + ps.coeff;
-        }
-        data.clear();
-        for (const auto& [ps, coeff] : merged) {
-                PauliString<> new_ps = ps;
-                new_ps.coeff = coeff;
-                data.push_back(new_ps);
-        }
-        return QubitHamiltonian(data);
-}
+
 
 
                 
