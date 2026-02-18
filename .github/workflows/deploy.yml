@@ -57,7 +57,7 @@ jobs:
     runs-on: ${{ matrix.runs-on }}
     strategy:
       matrix:
-        os: [ linux-intel, linux-arm, macos-arm ]
+        os: [ linux-intel, linux-arm, macos-arm, windows-intel ]
         include:
           - archs: native
             platform: auto
@@ -67,7 +67,8 @@ jobs:
             runs-on: aarch64
           - os: macos-arm
             runs-on: macos-15
-
+          - os: windows-intel
+            runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
         with:
@@ -95,6 +96,10 @@ jobs:
             # install symengine
             PREFIX="${SYMEMENGINE_PREFIX:-$HOME/.local}"
             ./tools/install-deps.sh "$PREFIX"
+          CIBW_BEFORE_ALL_WINDOWS: |
+            choco install -y gmp
+            # install symengine
+            ./tools/install-deps.bat
           # do not activate architecture-dependent compiler flags
           # 4 jobs in parallel, but do not start new ones if load average exceeds 5
           CIBW_ENVIRONMENT_LINUX: >
@@ -115,7 +120,9 @@ jobs:
              LDFLAGS="-L${GMP_PREFIX}/lib ${LDFLAGS}"
              PKG_CONFIG_PATH="${GMP_PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH}"
              CMAKE_PREFIX_PATH="${GMP_PREFIX}:$HOME/.local:${CMAKE_PREFIX_PATH}"
-        
+          CIBW_ENVIRONMENT_WINDOWS: >
+            CIBW="true"
+            
           # build 3.10, 3.11, 3.12, 3.13 (with GIL), and 3.14 (with GIL)
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
           # skip musl builds, and PyPy builds
@@ -130,6 +137,13 @@ jobs:
             fi
           # use abi3audit to catch issues with Limited API wheels
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: |
+            delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}
+            if [[ "{wheel}" == *abi3* ]]; then
+              pipx run abi3audit --strict --report {wheel}
+            else
+              echo "{wheel} is not abi3, skipping abi3audit"
+            fi
+          CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: |
             delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}
             if [[ "{wheel}" == *abi3* ]]; then
               pipx run abi3audit --strict --report {wheel}
