@@ -106,11 +106,15 @@ jobs:
           # do not activate architecture-dependent compiler flags
           # 4 jobs in parallel, but do not start new ones if load average exceeds 5
           CIBW_ENVIRONMENT_MACOS: >
-            CIBW="true"
-            MACOSX_DEPLOYMENT_TARGET=15.0
-            CMAKE_PREFIX_PATH="$HOME/.local"
-            CMAKE_INCLUDE_PATH="$(brew --prefix gmp)/include:$CMAKE_INCLUDE_PATH"
-            CMAKE_LIBRARY_PATH="$(brew --prefix gmp)/lib:$CMAKE_LIBRARY_PATH"
+             CIBW="true"
+             MACOSX_DEPLOYMENT_TARGET=15.0
+             GMP_PREFIX="$(brew --prefix gmp)"
+             CPPFLAGS="-I${GMP_PREFIX}/include ${CPPFLAGS}"
+             CFLAGS="-I${GMP_PREFIX}/include ${CFLAGS}"
+             CXXFLAGS="-I${GMP_PREFIX}/include ${CXXFLAGS}"
+             LDFLAGS="-L${GMP_PREFIX}/lib ${LDFLAGS}"
+             PKG_CONFIG_PATH="${GMP_PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH}"
+  CMAKE_PREFIX_PATH="${GMP_PREFIX}:$HOME/.local:${CMAKE_PREFIX_PATH}"
           # build 3.10, 3.11, 3.12, 3.13 (with GIL), and 3.14 (with GIL)
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
           # skip musl builds, and PyPy builds
