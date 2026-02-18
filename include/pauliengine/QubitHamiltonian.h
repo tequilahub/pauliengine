@@ -3,7 +3,6 @@
 #include <string>
 #include <complex>
 #include <vector>
-#include <omp.h>
 
 #include "pauliengine/PauliString.h"
 
