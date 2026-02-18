@@ -96,16 +96,16 @@ jobs:
             # install symengine
             PREFIX="${SYMEMENGINE_PREFIX:-$HOME/.local}"
             ./tools/install-deps.sh "$PREFIX"
-          CIBW_BEFORE_ALL_WINDOWS: |
-            choco install -y gmp
+          # CIBW_BEFORE_ALL_WINDOWS: |
+            # choco install -y gmp
             # install symengine
-            ./tools/install-deps.bat
+            # ./tools/install-deps.bat
           # do not activate architecture-dependent compiler flags
           # 4 jobs in parallel, but do not start new ones if load average exceeds 5
           CIBW_ENVIRONMENT_LINUX: >
             CIBW="true"
             SKBUILD_BUILD_TOOL_ARGS="-j4;-l5"
-            CMAKE_PREFIX_PATH="$HOME/.local"
+            # CMAKE_PREFIX_PATH="$HOME/.local"
           # set deployment target for C++20 compatibility
           # make brew-installed OpenMP discoverable by CMake
           # do not activate architecture-dependent compiler flags
