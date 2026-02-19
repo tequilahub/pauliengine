@@ -122,7 +122,7 @@ addopts = [
 ]
 pythonpath = ["."]
 testpaths = ["tests"]
-required_plugins = ["pytest-datadir"]
+# required_plugins = ["pytest-datadir"]
 
 [tool.coverage]
 run.source = ["src/pauliengine"]
