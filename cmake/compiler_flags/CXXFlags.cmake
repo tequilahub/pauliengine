@@ -37,7 +37,7 @@
 #
 #   CXXFLAGS
 
-option_with_print(PAULIENGINE_ENABLE_ARCH_FLAGS "Enable architecture-specific compiler flags" ON)
+option_with_print(PAULIENGINE_ENABLE_ARCH_FLAGS "Enable architecture-specific compiler flags" OFF)
 
 # code needs C++20 at least
 set(CMAKE_CXX_STANDARD 20)

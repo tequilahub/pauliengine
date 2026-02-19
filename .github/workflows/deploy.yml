@@ -33,7 +33,7 @@ env:
 jobs:
   build-sdist:
     name: Build source distribution
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v6
         with:
@@ -57,7 +57,7 @@ jobs:
     runs-on: ${{ matrix.runs-on }}
     strategy:
       matrix:
-        os: [ linux-intel, linux-arm, macos-arm, windows-intel ]
+        os: [ linux-intel, linux-arm, macos-arm, windows-intel, windows-arm]
         include:
           - archs: native
             platform: auto
@@ -66,8 +66,10 @@ jobs:
           - os: linux-arm
             runs-on: aarch64
           - os: macos-arm
-            runs-on: macos-15
+            runs-on: macos-latest
           - os: windows-intel
+            runs-on: windows-latest
+          - os: windows-arm
             runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
@@ -147,9 +149,8 @@ jobs:
             else
               echo "{wheel} is not abi3, skipping abi3audit"
             fi
-          # CIBW_TEST_COMMAND: python -m pytest {package}/tests
-          # CIBW_TEST_GROUPS: "test"
-          # CIBW_TEST_SKIP: "*-macosx_arm64"
+          CIBW_TEST_COMMAND: python -m pytest {package}/tests
+          CIBW_TEST_GROUPS: "test"
 
       - name: Upload wheels
         uses: actions/upload-artifact@v6
