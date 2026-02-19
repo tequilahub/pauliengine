@@ -33,7 +33,7 @@ env:
 jobs:
   build-sdist:
     name: Build source distribution
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
