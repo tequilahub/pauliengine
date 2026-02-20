@@ -50,7 +50,7 @@ class PauliString {
                 }
 
 
-                PauliString(const std::unordered_map<int, std::string>& data, std::complex<double> coeff) {
+                PauliString(std::complex<double> coeff, const std::unordered_map<int, std::string>& data) {
                         this->coeff = coeff;
                         uint64_t mask;
                         for (const auto& [key, value] : data) {
@@ -72,7 +72,7 @@ class PauliString {
                         }
                 }
 
-                PauliString(const std::unordered_map<int, std::string>& data, std::string coeff) {
+                PauliString(std::string coeff, std::unordered_map<int, std::string>& data) {
                         this->coeff = coeff;
                         uint64_t mask;
                         for (const auto& [key, value] : data) {
@@ -97,7 +97,7 @@ class PauliString {
                 }
 
 #ifdef HAVE_SYMENGINE
-                PauliString(const std::unordered_map<int, std::string>& data, Expression coeff) {
+                PauliString(Expression coeff, const std::unordered_map<int, std::string>& data) {
                         this->coeff = coeff;
                         uint64_t mask;
                         for (const auto& [key, value] : data) {
@@ -127,9 +127,9 @@ class PauliString {
                         this->coeff = coeff;
                 }
 
-                PauliString(const std::pair<std::vector<std::pair<char, int>>, Coeff>& input) {
-                        this->coeff = input.second;
-                        std::vector<std::pair<char, int>> paulis = input.first;
+                PauliString(const std::pair<std::complex<double>, std::vector<std::pair<char, int>>>& input) {
+                        this->coeff = input.first;
+                        std::vector<std::pair<char, int>> paulis = input.second;
                         uint64_t mask = 0;
                         for (int i = 0; i < paulis.size(); i++) {
                                 size_t index = paulis[i].second / BITS_IN_INTEGER;
@@ -148,9 +148,9 @@ class PauliString {
                         }
                 }
 
-                PauliString(const std::pair<std::vector<std::pair<char, int>>, std::string>& input) {
-                        this->coeff = input.second;
-                        std::vector<std::pair<char, int>> paulis = input.first;
+                PauliString(const std::pair<std::string, std::vector<std::pair<char, int>>>& input) {
+                        this->coeff = input.first;
+                        std::vector<std::pair<char, int>> paulis = input.second;
                         uint64_t mask = 0;
                         for (int i = 0; i < paulis.size(); i++) {
                                 size_t index = paulis[i].second / BITS_IN_INTEGER;
@@ -284,7 +284,7 @@ class PauliString {
                                         mapped[old_idx] = pauli_char;
                                 }
                         }
-                        return PauliString(mapped, this->coeff);
+                        return PauliString(this->coeff, mapped);
                 }   
 
                 std::string to_string() const {

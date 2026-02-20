@@ -17,18 +17,17 @@ The following items are planned or not yet fully implemented:
 ```python
 import pauliengine as pe
 # Example : Z on qubit 0 with coefficient 1.0
-p1 = pe.PauliString ((1.0, {0: "Z"}))
+p1 = pe.PauliString (1.0, {0: "Z"})
 
 # Example : X on qubit 1 with coefficient "a" ( symbolic )
-p2 = pe.PauliString (("a", {1: "X"}))
+p2 = pe.PauliString ("a", {1: "X"})
 
 # Example : OpenFermion style
 p3 = pe.PauliString ((1.0, [("X", 0), ("Y", 2) ]))
 ```
 ### Standard Operations
 ```python
-# Addition:
-p4 = p2 + p3
+
 # Multiplication
 p5 = p4 * p1
 # fast commutators
@@ -38,10 +37,10 @@ c = p1.commutator(p2)
 ### Parametrized Operators
 ```python
 # create PauliString objects
-p1 = pe.PauliString ((1.0 , {0: "Z"})) # not parametrized
-p2 = pe.PauliString (("a", {1: "X"}))  # parametrized
+p1 = pe.PauliString (1.0 , {0: "Z"}) # not parametrized
+p2 = pe.PauliString ("a", {1: "X"})  # parametrized
 # assemble operator
-H = QubitHamiltonian([p1 , p2 ])
+H = pe.QubitHamiltonian([p1 , p2 ])
 ```
 In beta version, mixed types need to be created like this (create atomic PauliStrings, then assemble operator)
 

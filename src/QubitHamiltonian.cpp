@@ -15,7 +15,7 @@ class QubitHamiltonian {
                         std::vector<PauliString<>> converted_data;
                         converted_data.reserve(data.size());
                         for (Pauli_structure entry : data) {
-                                converted_data.push_back(PauliString<>(entry.second, entry.first));
+                                converted_data.push_back(PauliString<>(entry.first, entry.second));
                         }
                         this->data = converted_data;
                 }
@@ -24,7 +24,7 @@ class QubitHamiltonian {
                         std::vector<PauliString<>> converted_data;
                         converted_data.reserve(data.size());
                         for (Pauli_structure_variable entry : data) {
-                                converted_data.push_back(PauliString<>(entry.second, entry.first));
+                                converted_data.push_back(PauliString<>(entry.first, entry.second));
                         }
                         this->data = converted_data;
                 }
@@ -237,10 +237,14 @@ class QubitHamiltonian {
 NB_MODULE(PauliEngine, m) {
         nb::class_<PauliString<>>(m, "PauliString", "Represents a Pauli string in binary symplectic form.")
                 .def(nb::init<>(), "Default constructor.")
-                .def(nb::init<const std::unordered_map<int, std::string>&, std::complex<double>>(),
+                .def(nb::init<const std::string, const std::unordered_map<int, std::string>>(),
                 "Constructor from a map of qubit indices to Pauli operators and a complex coefficient.")
-                .def(nb::init<const std::unordered_map<int, std::string>&, std::string>(),
-                "Constructor from a map of qubit indices to Pauli operators and a complex coefficient.")
+                .def(nb::init<std::complex<double>, const std::unordered_map<int, std::string>>(),
+                "Constructor from a map of qubit indices to Pauli operators and a symbolic coefficient.")
+                .def(nb::init<const std::pair<std::complex<double>, std::vector<std::pair<char, int>>>>(),
+                "Constructor OpenFermion style and a complex coefficient.")
+                .def(nb::init<const std::pair<std::string, std::vector<std::pair<char, int>>>>(),
+                "Constructor OpenFermion style and a symbolic coefficient.")
                 .def("to_string", &PauliString<>::to_string, "Returns a human-readable string representation of the Pauli string.")
                 .def("is_all_z", &PauliString<>::is_all_z, "Checks if the Pauli string consists only of Z operators.")
                 .def("get_coeff", &PauliString<>::get_coeff, "Returns the complex coefficient of the Pauli string.")
