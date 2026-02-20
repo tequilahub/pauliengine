@@ -97,6 +97,7 @@ jobs:
             conan profile --detect
 
             # install symengine
+            conan profile detect --force 
             conan install .  --output-folder=build --build=missing -pr ./conan_profile
              
           CIBW_BEFORE_ALL_MACOS: |
@@ -109,6 +110,7 @@ jobs:
           # do not activate architecture-dependent compiler flags
           # 4 jobs in parallel, but do not start new ones if load average exceeds 5
           CIBW_ENVIRONMENT_LINUX: >
+            CMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake
             CIBW="true"
             SKBUILD_BUILD_TOOL_ARGS="-j4;-l5"
             # CMAKE_PREFIX_PATH="$HOME/.local"
