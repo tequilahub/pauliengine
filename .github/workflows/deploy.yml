@@ -124,7 +124,7 @@ jobs:
             SKBUILD_BUILD_TOOL_ARGS="-j4;-l5"
           CIBW_ENVIRONMENT_WINDOWS: >
             CIBW="true"
-            SKBUILD_BUILD_TOOL_ARGS="/m:4;/l:5"
+            SKBUILD_BUILD_TOOL_ARGS="/m:4"
           # build 3.10, 3.11, 3.12, 3.13 (with GIL), and 3.14 (with GIL)
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
           # skip musl builds, and PyPy builds
