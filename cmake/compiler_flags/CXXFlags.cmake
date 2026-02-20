@@ -6,7 +6,7 @@
 # flags.
 # The complete list of flags is built as:
 #
-#   CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_<CONFIG> ARCH_FLAG pauliengine_CXX_FLAGS EXTRA_CXXFLAGS
+#   CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_<CONFIG> ARCH_FLAG PAULIENGINE_CXX_FLAGS EXTRA_CXXFLAGS
 #
 # where:
 #
@@ -17,7 +17,7 @@
 #   ``Clang.CXX.cmake``, and ``Intel.CXX.cmake`` files.
 # - ``ARCH_FLAG`` is the architecture-dependent optimization flag, *e.g.*
 #   vectorization. Default is empty.
-# - ``pauliengine_CXX_FLAGS`` are PAULIENGINE-lite-specific flags to be used for all builds.
+# - ``PAULIENGINE_CXX_FLAGS`` are PAULIENGINE-specific flags to be used for all builds.
 #   The defaults are compiler-dependent: have a look at the ``GNU.CXX.cmake``,
 #   ``Clang.CXX.cmake``, and ``Intel.CXX.cmake`` files.
 # - ``EXTRA_CXXFLAGS`` useful if you need to append certain flags to the full
@@ -72,7 +72,7 @@ if(PAULIENGINE_ENABLE_ARCH_FLAGS AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
   endif()
 endif()
 
-set(pauliengine_CXX_FLAGS "")
+set(PAULIENGINE_CXX_FLAGS "")
 include(${CMAKE_CURRENT_LIST_DIR}/GNU.CXX.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/Intel.CXX.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/Clang.CXX.cmake)

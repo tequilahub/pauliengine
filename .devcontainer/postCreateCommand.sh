@@ -16,3 +16,12 @@ from libstdcxx.v6.printers import register_libstdcxx_printers
 register_libstdcxx_printers (None)
 end
 EOT
+
+# install conan
+uv venv
+source /home/vscode/.venv/bin/activate
+uv pip install conan 
+
+# setup conan profile and install dependencies
+conan profile detect --force 
+conan install . --output-folder=build --build=missing 

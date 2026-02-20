@@ -12,11 +12,5 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     libgmp-dev \
     ninja-build
 
-COPY tools/install-deps.sh /usr/local/bin/install-deps.sh
-
-RUN /usr/local/bin/install-deps.sh \
-    && apt-get autoremove -y \
-    && apt-get clean -y \
-    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=uv --chown=vscode /uv /uvx /bin/

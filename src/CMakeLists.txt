@@ -26,7 +26,8 @@ find_package(SymEngine CONFIG)
 
 if (SymEngine_FOUND)
     target_compile_definitions(pauliengine-objs PUBLIC HAVE_SYMENGINE)
-    target_link_libraries(pauliengine-objs PUBLIC symengine gmp)
+    # target_link_libraries(pauliengine-objs PUBLIC symengine gmp)
+    target_link_libraries(pauliengine-objs PUBLIC symengine)
 endif()
     
 # flags to prepend
@@ -43,11 +44,11 @@ target_compile_options(pauliengine-objs PUBLIC "${EXTRA_CXXFLAGS}")
 
 if(DEFINED SKBUILD)
   add_subdirectory(bindings)
-else()
+# else()
   # if you want to compile some local C++ executable for testing
-  if (SymEngine_FOUND)
-      add_executable(example.x example.cpp)
-      target_compile_definitions(example.x PUBLIC HAVE_SYMENGINE)
-  endif()
+  # if (SymEngine_FOUND)
+      # add_executable(example.x example.cpp)
+      # target_compile_definitions(example.x PUBLIC HAVE_SYMENGINE)
+  # endif()
 endif()
 

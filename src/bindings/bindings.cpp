@@ -43,7 +43,11 @@ NB_MODULE(_core, m) {
                 .def("set_coeff", &PauliString<>::set_coeff, "Sets coefficient using a SymEngine expression")
                 .def_static("to_complex", &PauliString<>::to_complex, "Parse SymEngine expression into complex number")
                 .def("copy", &PauliString<>::copy, "Create a copy of the PauliString")
-                .def("get_pauli_at_index", &PauliString<>::get_pauli_from_index, "Returns list of qubits");
+                .def("get_pauli_at_index", &PauliString<>::get_pauli_from_index, "Returns list of qubits")
+                .def_ro("x", &PauliString<>::x, "Returns the x vector of the Pauli string.")
+                .def_ro("y", &PauliString<>::y, "Returns the y vector of the Pauli string.")
+                .def_ro("coeff", &PauliString<>::coeff, "Returns the coefficient of the Pauli string.")
+                .def_ro("is_zero", &PauliString<>::is_zero, "Returns whether the Pauli string is zero.");
 
         nb::class_<QubitHamiltonian>(m, "QubitHamiltonian", "Represents a Hamiltonian as a sum of Pauli strings.")
                 .def(nb::init<const std::vector<PauliString<>>&>(), "Constructor from a vector of Pauli strings.")
