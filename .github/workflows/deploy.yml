@@ -92,37 +92,39 @@ jobs:
           CIBW_DEBUG_TRACEBACK: TRUE
           CIBW_BEFORE_ALL_LINUX: |
             dnf install -y ninja-build
-            
             # install conan and C++ dependencies for the project
             pip install conan
-            conan profile --detect
-
+            conan profile detect --force
             # install symengine
-            conan profile detect --force 
             conan install .  --output-folder=build --build=missing -pr ./conan_profile  
-          # CIBW_BEFORE_ALL_MACOS: |
-          #   brew install gmp
-          #   # install symengine
-          #   PREFIX="${SYMEMENGINE_PREFIX:-$HOME/.local}"
-          #   ./tools/install-deps.sh "$PREFIX"
-          # CIBW_BEFORE_ALL_WINDOWS: |
-          #   pip install delvewheel
+          CIBW_BEFORE_ALL_MACOS: |
+            # install conan and C++ dependencies for the project
+            pip install conan
+            conan profile detect --force 
+            # install symengine
+            conan install .  --output-folder=build --build=missing -pr ./conan_profile
+          CIBW_BEFORE_ALL_WINDOWS: |
+            pip install delvewheel conan
+            conan profile detect --force
+            # install symengine
+            conan install .  --output-folder=build --build=missing -pr ./conan_profile 
           # do not activate architecture-dependent compiler flags
           # 4 jobs in parallel, but do not start new ones if load average exceeds 5
           CIBW_ENVIRONMENT_LINUX: >
             CMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake
             CIBW="true"
             SKBUILD_BUILD_TOOL_ARGS="-j4;-l5"
-            # CMAKE_PREFIX_PATH="$HOME/.local"
           # set deployment target for C++20 compatibility
           # make brew-installed OpenMP discoverable by CMake
           # do not activate architecture-dependent compiler flags
           # 4 jobs in parallel, but do not start new ones if load average exceeds 5
-          # CIBW_ENVIRONMENT_MACOS: >
-          #    CIBW="true"
-          #    MACOSX_DEPLOYMENT_TARGET=15.0
-          # CIBW_ENVIRONMENT_WINDOWS: >
-          #   CIBW="true"
+          CIBW_ENVIRONMENT_MACOS: >
+             CIBW="true"
+             MACOSX_DEPLOYMENT_TARGET=15.0
+            SKBUILD_BUILD_TOOL_ARGS="-j4;-l5"
+          CIBW_ENVIRONMENT_WINDOWS: >
+            CIBW="true"
+            SKBUILD_BUILD_TOOL_ARGS="/m:4;/l:5"
           # build 3.10, 3.11, 3.12, 3.13 (with GIL), and 3.14 (with GIL)
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
           # skip musl builds, and PyPy builds
@@ -136,20 +138,20 @@ jobs:
               echo "{wheel} is not abi3, skipping abi3audit"
             fi
           # use abi3audit to catch issues with Limited API wheels
-          # CIBW_REPAIR_WHEEL_COMMAND_MACOS: |
-          #   delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}
-          #   if [[ "{wheel}" == *abi3* ]]; then
-          #     pipx run abi3audit --strict --report {wheel}
-          #   else
-          #     echo "{wheel} is not abi3, skipping abi3audit"
-          #   fi
-          # CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: |
-          #   delvewheel repair -w {dest_dir} {wheel}
-          #   if [[ "{wheel}" == *abi3* ]]; then
-          #     pipx run abi3audit --strict --report {wheel}
-          #   else
-          #     echo "{wheel} is not abi3, skipping abi3audit"
-          #   fi
+          CIBW_REPAIR_WHEEL_COMMAND_MACOS: |
+            delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}
+            if [[ "{wheel}" == *abi3* ]]; then
+              pipx run abi3audit --strict --report {wheel}
+            else
+              echo "{wheel} is not abi3, skipping abi3audit"
+            fi
+          CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: |
+            delvewheel repair -w {dest_dir} {wheel}
+            if [[ "{wheel}" == *abi3* ]]; then
+              pipx run abi3audit --strict --report {wheel}
+            else
+              echo "{wheel} is not abi3, skipping abi3audit"
+            fi
           CIBW_TEST_COMMAND: python -m pytest {package}/tests
           CIBW_TEST_GROUPS: "test"
 
