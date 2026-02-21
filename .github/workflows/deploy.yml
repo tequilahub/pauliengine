@@ -106,8 +106,8 @@ jobs:
             # install symengine
             conan install .  --output-folder=build --build=missing -pr ./conan_profile
           CIBW_BEFORE_ALL_WINDOWS: |
-            pip install delvewheel conan
-
+            pip install delvewheel 
+            pip install conan
             conan profile detect --force
             conan install . --output-folder=build --build=missing -pr conan_profile 
           # do not activate architecture-dependent compiler flags
