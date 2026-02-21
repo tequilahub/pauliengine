@@ -57,17 +57,16 @@ jobs:
     runs-on: ${{ matrix.runs-on }}
     strategy:
       matrix:
-        # os: [ linux-intel, linux-arm, macos-arm, windows-intel, windows-arm]
-        os: [ windows-intel, windows-arm]
+        os: [ linux-intel, linux-arm, macos-arm, windows-intel, windows-arm]
         include:
           - archs: native
             platform: auto
-          # - os: linux-intel
-          #   runs-on: ubuntu-latest
-          # - os: linux-arm
-          #   runs-on: ubuntu-24.04-arm
-          # - os: macos-arm
-          #   runs-on: macos-latest
+          - os: linux-intel
+            runs-on: ubuntu-latest
+          - os: linux-arm
+            runs-on: ubuntu-24.04-arm
+          - os: macos-arm
+            runs-on: macos-latest
           - os: windows-intel
             runs-on: windows-latest
           - os: windows-arm
@@ -114,7 +113,6 @@ jobs:
             CIBW="true"
             SKBUILD_BUILD_TOOL_ARGS="-j4;-l5"
           # set deployment target for C++20 compatibility
-          # make brew-installed OpenMP discoverable by CMake
           # do not activate architecture-dependent compiler flags
           # 4 jobs in parallel, but do not start new ones if load average exceeds 5
           CIBW_ENVIRONMENT_MACOS: >
@@ -160,25 +158,3 @@ jobs:
         with:
           name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
           path: wheelhouse/*.whl
-
-  # upload_all:
-  #   name: Upload if release
-  #   needs:
-  #     - build_wheels
-  #     - build_sdist
-  #   environment: pypi
-  #   permissions:
-  #     id-token: write
-  #   runs-on: ubuntu-latest
-  #     #if: github.event_name == 'release' && github.event.action == 'published'
-
-  #   steps:
-  #     - uses: actions/download-artifact@v4
-  #       with:
-  #         pattern: cibw-*
-  #         path: dist
-  #         merge-multiple: true
-
-  #     - uses: pypa/gh-action-pypi-publish@release/v1
-  #       with:
-  #         repository-url: https://test.pypi.org/legacy/

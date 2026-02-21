@@ -23,7 +23,7 @@ def test_pauli_string_invalid_pauli_string_input(invalid_pauli_string):
         pe.PauliString(invalid_pauli_string, 1.0)
 
 
-@pytest.mark.parametrize(("pauli_string1", "pauli_string2", "expected_product"), [
+@pytest.mark.parametrize(("pauli_string", "other", "expected_product"), [
     (pe.PauliString({0: "X", 1: "Z", 2: "Y", 3: "Z"}, 1.0),
      pe.PauliString({0: "Z", 1: "Z", 4: "X"}, 2.0),
      pe.PauliString({0: "Y", 2: "Y", 3: "Y"}, 2.0)), # XZYZ * ZZIX = YIYY 
