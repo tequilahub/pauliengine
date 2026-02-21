@@ -4,4 +4,4 @@
 uv sync --all-groups --all-extras
 
 # install pre-commit hooks
-# uv run pre-commit install --install-hooks
+uv run pre-commit install --install-hooks
