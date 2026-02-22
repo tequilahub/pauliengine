@@ -40,7 +40,7 @@ class PauliString {
                 uint64_t is_zero{true};
                 PauliString() = default;
 
-                PauliString(const std::unordered_map<int, std::string>& data, Coeff coeff) {
+                PauliString(Coeff coeff, const std::unordered_map<int, std::string>& data) {
                         this->coeff = coeff;
                         uint64_t mask;
                         for (const auto& [key, value] : data) {

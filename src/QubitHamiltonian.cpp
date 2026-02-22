@@ -3,39 +3,29 @@
 
 QubitHamiltonian::QubitHamiltonian(const std::vector<PauliString<>>& data) {
             this->data = data;
-    }
+ }
 
 QubitHamiltonian::QubitHamiltonian(const Hamiltonian_structure& data) {
-                        std::vector<PauliString<>> converted_data;
-                        converted_data.reserve(data.size());
-                        for (Pauli_structure entry : data) {
-                                converted_data.push_back(PauliString<>(entry.first, entry.second));
-                        }
-                        this->data = converted_data;
-                }    
+        std::vector<PauliString<>> converted_data;
+        converted_data.reserve(data.size());
+        for (Pauli_structure entry : data) {
+                converted_data.push_back(PauliString<>(entry.first, entry.second));
+        }
+        this->data = converted_data;
+}    
                 
 #ifdef HAVE_SYMENGINE
 QubitHamiltonian::QubitHamiltonian(const Hamiltonian_structure_variable& data) {
         std::vector<PauliString<>> converted_data;
         converted_data.reserve(data.size());
         for (Pauli_structure_variable entry : data) {
-                converted_data.push_back(PauliString<>(entry.second, entry.first));
+                converted_data.push_back(PauliString<>(entry.first, entry.second));
         }
         this->data = converted_data;
 }
-                }
-
-                QubitHamiltonian(const Hamiltonian_structure_variable& data) {
-                        std::vector<PauliString<>> converted_data;
-                        converted_data.reserve(data.size());
-                        for (Pauli_structure_variable entry : data) {
-                                converted_data.push_back(PauliString<>(entry.first, entry.second));
-                        }
-                        this->data = converted_data;
-                }
 
 QubitHamiltonian QubitHamiltonian::compact() {
-        std::unordered_map<PauliString<>, SymEngine::Expression, PauliStringHash> merged;
+        std::unordered_map<PauliString<>, Coeff, PauliStringHash> merged;
         for (const auto& ps : data) {
                 merged[ps] = merged[ps] + ps.coeff;
         }
