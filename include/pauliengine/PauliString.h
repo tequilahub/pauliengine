@@ -422,6 +422,8 @@ class PauliString {
                 }
 
 };
+
+
 template<typename Coeff>
 struct PauliStringHash {
     size_t operator()(const PauliString<Coeff>& ps) const {

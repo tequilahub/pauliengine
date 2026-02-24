@@ -128,7 +128,7 @@ class QubitHamiltonian{
 
 
         QubitHamiltonian compact(){
-        std::unordered_map<PauliString<Coeff>, SymEngine::Expression, PauliStringHash> merged;
+        std::unordered_map<PauliString<Coeff>, SymEngine::Expression, PauliStringHash<Coeff>> merged;
         for (const auto& ps : data) {
                 merged[ps] = merged[ps] + ps.coeff;
         }
@@ -141,37 +141,8 @@ class QubitHamiltonian{
         return QubitHamiltonian(data);
 }
 
-        Hamiltonian_structure parse_python_format() const{
-                Hamiltonian_structure output;
-            output.reserve(this->data.size());
-            for (const auto& entry : this->data) {
-                    std::unordered_map<int, std::string> temp;
-                    temp.reserve(entry.x.size() * BITS_IN_INTEGER);
-                    for (size_t i = 0; i < entry.x.size(); ++i) {
-                            uint64_t x_word = entry.x[i];
-                            uint64_t y_word = entry.y[i];
-                            for (int j = 0; j < BITS_IN_INTEGER; ++j) {
-                                    uint64_t bit = (uint64_t)1 << j;
-                                    bool x_bit = x_word & bit;
-                                    bool y_bit = y_word & bit;
-                                    if (!x_bit && !y_bit) continue;
-                                    int index = i * BITS_IN_INTEGER + j;
-                                    if (x_bit && y_bit) {
-                                            temp[(int)index] = "Z";
-                                    } else if (x_bit) {
-                                            temp[(int)index] = "X";
-                                    } else {
-                                            temp[(int)index] = "Y";
-                                    }
-                            }
-                    }
-
-                    output.emplace_back(entry.coeff, std::move(temp));
-            }
-            return output;
-    }
-    Hamiltonian_structure parse_python_format() const{
-            Hamiltonian_structure output;
+        Hamiltonian_structure<Coeff> parse_python_format() const{
+                Hamiltonian_structure<Coeff> output;
             output.reserve(this->data.size());
             for (const auto& entry : this->data) {
                     std::unordered_map<int, std::string> temp;
@@ -201,7 +172,39 @@ class QubitHamiltonian{
     }
 
     private:
-    static Matrix2D get_pauli_matrix(const std::string& p);
-    static Matrix2D tensor_product(const Matrix2D& A, const Matrix2D& B);
-    static Matrix2D pauli_string_to_matrix(const std::unordered_map<int, std::string>& pauli_map, int num_qubits);
+    static Matrix2D get_pauli_matrix(const std::string& p){static const std::complex<double> I(0,1);
+        if (p == "I") return {{1,0},{0,1}};
+        else if (p == "X") return {{0,1},{1,0}};
+        else if (p == "Y") return {{0,-I},{I,0}};
+        else if (p == "Z") return {{1,0},{0,-1}};
+        else throw std::runtime_error("Unbekannter Pauli-Operator");
+}
+    static Matrix2D tensor_product(const Matrix2D& A, const Matrix2D& B){
+        int rows = A.size() * B.size();
+        int cols = A[0].size() * B[0].size();
+        Matrix2D result(rows, std::vector<std::complex<double>>(cols, 0));
+
+        for (int i=0; i<(int)A.size(); ++i) {
+                for (int j=0; j<(int)A[0].size(); ++j) {
+                        for (int k=0; k<(int)B.size(); ++k) {
+                                for (int l=0; l<(int)B[0].size(); ++l) {
+                                        result[i*B.size()+k][j*B[0].size()+l] = A[i][j] * B[k][l];
+                                }
+                        }
+                }
+        }
+        return result;
+}
+    static Matrix2D pauli_string_to_matrix(const std::unordered_map<int, std::string>& pauli_map, int num_qubits){
+        Matrix2D result = get_pauli_matrix("I");
+        for (int q=0; q < num_qubits; ++q) {
+                std::string op = "I";
+                auto it = pauli_map.find(q);
+                if (it != pauli_map.end()) op = it->second;
+                Matrix2D pmat = get_pauli_matrix(op);
+                result = tensor_product(result, pmat);
+        }
+        return result;
+}
+
 };
