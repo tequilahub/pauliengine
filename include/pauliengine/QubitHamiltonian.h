@@ -6,11 +6,9 @@
 
 #include "pauliengine/PauliString.h"
 
-#ifdef HAVE_SYMENGINE
 #include <symengine/expression.h>
 using SymEngine::Expression;
-#else
-#endif
+
 
 
 
@@ -18,10 +16,8 @@ using SymEngine::Expression;
 
 
 using Pauli_structure = std::pair<std::complex<double>, std::unordered_map<int, std::string>>;
-#ifdef HAVE_SYMENGINE
 using Pauli_structure_variable = std::pair<SymEngine::Expression, std::unordered_map<int, std::string>>;
 using Hamiltonian_structure_variable = std::vector<Pauli_structure_variable>;
-#endif
 
 using Hamiltonian_structure = std::vector<Pauli_structure>;
 using Matrix2D = std::vector<std::vector<std::complex<double>>>;
@@ -33,12 +29,12 @@ class QubitHamiltonian{
     public:
     std::vector<PauliString<>> data;
 
-    QubitHamiltonian(const std::vector<PauliString<>>& data); 
+    QubitHamiltonian(const std::vector<PauliString<>>& data);
     QubitHamiltonian(const Hamiltonian_structure& data);
     QubitHamiltonian trace_out_qubits(const std::vector<int>& qubits, const std::vector<int>& state);
     std::string to_string();
-    
-    
+
+
     QubitHamiltonian operator*(std::complex<double> scale) const{
             QubitHamiltonian to_scale = QubitHamiltonian(this->data);
             for (auto &entry : to_scale.data) {
@@ -51,8 +47,8 @@ class QubitHamiltonian{
                 data.reserve(this->data.size() * other.data.size());
                 for (auto &entry_first : this->data) {
                         for (auto &entry_second : other.data) {
-                                data.push_back(entry_first * entry_second);                       
-                        }    
+                                data.push_back(entry_first * entry_second);
+                        }
                 }
                 // return QubitHamiltonian(data).compact();
                 return QubitHamiltonian(data);
@@ -65,8 +61,8 @@ class QubitHamiltonian{
                 for (auto &entry_first : first_parsed.data) {
                         //TODO: Multi-Threading
                         for (auto it = second_parsed.data.begin(); it != second_parsed.data.end(); ) {
-                                if (entry_first == *it) { 
-                                        entry_first.coeff += it->coeff; 
+                                if (entry_first == *it) {
+                                        entry_first.coeff += it->coeff;
                                         it = second_parsed.data.erase(it);
                                         remaining_in_second--;
                                         continue;
@@ -84,7 +80,7 @@ class QubitHamiltonian{
                 }
                 return QubitHamiltonian(data);
         }
-        
+
         QubitHamiltonian diff(std::string symbol) const{
                 std::vector<PauliString<>> data;
                 for (const PauliString<>& ps : this->data) {
@@ -95,7 +91,7 @@ class QubitHamiltonian{
                 }
                 return QubitHamiltonian(data);
     }
-    
+
     QubitHamiltonian substitute(const std::unordered_map<std::string, std::complex<double>>& substitution_map) const {
             std::vector<PauliString<>> temp_data;
             for (const auto &ps : data) {
@@ -103,8 +99,7 @@ class QubitHamiltonian{
                 }
                 return QubitHamiltonian(temp_data);
         }
-        
-        #ifdef HAVE_SYMENGINE
+
 
         QubitHamiltonian(const Hamiltonian_structure_variable& data);
 
@@ -112,10 +107,10 @@ class QubitHamiltonian{
 
         Hamiltonian_structure_variable parse_python_format() const{
                 Hamiltonian_structure_variable output;
-            output.reserve(this->data.size()); 
+            output.reserve(this->data.size());
             for (const auto& entry : this->data) {
                     std::unordered_map<int, std::string> temp;
-                    temp.reserve(entry.x.size() * BITS_IN_INTEGER); 
+                    temp.reserve(entry.x.size() * BITS_IN_INTEGER);
                     for (size_t i = 0; i < entry.x.size(); ++i) {
                             uint64_t x_word = entry.x[i];
                             uint64_t y_word = entry.y[i];
@@ -139,13 +134,12 @@ class QubitHamiltonian{
             }
             return output;
     }
-    #else
     Hamiltonian_structure parse_python_format() const{
             Hamiltonian_structure output;
-            output.reserve(this->data.size()); 
+            output.reserve(this->data.size());
             for (const auto& entry : this->data) {
                     std::unordered_map<int, std::string> temp;
-                    temp.reserve(entry.x.size() * BITS_IN_INTEGER); 
+                    temp.reserve(entry.x.size() * BITS_IN_INTEGER);
                     for (size_t i = 0; i < entry.x.size(); ++i) {
                             uint64_t x_word = entry.x[i];
                             uint64_t y_word = entry.y[i];
@@ -169,7 +163,6 @@ class QubitHamiltonian{
             }
             return output;
     }
-    #endif
 
     private:
     static Matrix2D get_pauli_matrix(const std::string& p);

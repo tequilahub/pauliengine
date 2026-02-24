@@ -12,9 +12,8 @@ QubitHamiltonian::QubitHamiltonian(const Hamiltonian_structure& data) {
                 converted_data.push_back(PauliString<>(entry.first, entry.second));
         }
         this->data = converted_data;
-}    
-                
-#ifdef HAVE_SYMENGINE
+}
+
 QubitHamiltonian::QubitHamiltonian(const Hamiltonian_structure_variable& data) {
         std::vector<PauliString<>> converted_data;
         converted_data.reserve(data.size());
@@ -37,7 +36,6 @@ QubitHamiltonian QubitHamiltonian::compact() {
         }
         return QubitHamiltonian(data);
 }
-#endif
 
 
 QubitHamiltonian QubitHamiltonian::trace_out_qubits(const std::vector<int>& qubits, const std::vector<int>& state) {
@@ -56,11 +54,11 @@ std::string QubitHamiltonian::to_string() {
         std::string result = "";
         for (int i = 0; i < this->data.size(); i++) {
                 result.append(data[i].to_string() + "\n");
-        }    
-        return result;   
+        }
+        return result;
 }
-               
-                
+
+
 Matrix2D QubitHamiltonian::get_pauli_matrix(const std::string& p){static const std::complex<double> I(0,1);
         if (p == "I") return {{1,0},{0,1}};
         else if (p == "X") return {{0,1},{1,0}};
