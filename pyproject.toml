@@ -27,6 +27,7 @@ classifiers = [
 dynamic = ["version"]
 dependencies = [
   "numpy",
+  "symengine",
 ]
 
 [dependency-groups]
