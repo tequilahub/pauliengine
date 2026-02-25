@@ -204,7 +204,16 @@ class PauliString {
                 std::string to_string() const {
                         std::ostringstream oss;
                         size_t num_qubits = x.size() * BITS_IN_INTEGER;
-                        oss << str(this->coeff) << " : ";
+
+                        // if Coeff is complex
+                        if constexpr (std::is_same<Coeff, std::complex<double>>::value) {
+                                oss << std::to_string(this->coeff.real()) + " + " + std::to_string(this->coeff.imag()) + "i : ";
+                        }
+                        // if is SymEngine::Expression this should be enough
+                        else {
+                                oss << str(this->coeff) << " : ";
+                        }
+
                         for (size_t i = 0; i < num_qubits; ++i) {
                                 size_t word = i / BITS_IN_INTEGER;
                                 size_t bit = i % BITS_IN_INTEGER;
