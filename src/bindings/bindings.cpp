@@ -52,7 +52,7 @@ NB_MODULE(_core, m) {
                 .def_ro("is_zero", &PauliString<std::complex<double>>::is_zero, "Returns whether the Pauli string is zero.");
 
         // PauliString for SymEngine::Expression coefficients
-        nb::class_<PauliString<SymEngine::Expression>>(m, "PauliString", "Represents a Pauli string in binary symplectic form.")
+        nb::class_<PauliString<SymEngine::Expression>>(m, "PauliStringSym", "Represents a Pauli string in binary symplectic form.")
                 .def(nb::init<>(), "Default constructor.")
                 .def(nb::init<SymEngine::Expression, const std::unordered_map<int, std::string>&>(),
                 "Constructor from a map of qubit indices to Pauli operators and a complex coefficient.")
@@ -97,7 +97,7 @@ NB_MODULE(_core, m) {
                 .def("__repr__",&QubitHamiltonian<std::complex<double>>::to_string, "Returns a human-readable string representation of the QubitHamiltonian operator.");
 
         // QubitHamiltonian for SymEngine::Expression coefficients
-        nb::class_<QubitHamiltonian<SymEngine::Expression>>(m, "QubitHamiltonian", "Represents a Hamiltonian as a sum of Pauli strings.")
+        nb::class_<QubitHamiltonian<SymEngine::Expression>>(m, "QubitHamiltonianSym", "Represents a Hamiltonian as a sum of Pauli strings.")
                 .def(nb::init<const std::vector<PauliString<SymEngine::Expression>>&>(), "Constructor from a vector of Pauli strings.")
                 .def(nb::init<const Hamiltonian_structure<SymEngine::Expression>&>(), "Constructor from a Hamiltonian structure (coefficient and operator map).")
                 .def("__add__", &QubitHamiltonian<SymEngine::Expression>::operator+, "Adds two Hamiltonians.")
@@ -113,6 +113,9 @@ NB_MODULE(_core, m) {
         nb::class_<SymEngine::Expression>(m, "Expression")
                 .def(nb::init<const std::string&>())  // Konstruktor aus String
                 .def("__str__", [](const SymEngine::Expression &e) {
+                        return SymEngine::str(*e.get_basic());
+                })
+                .def("__repr__", [](const SymEngine::Expression &e) {
                         return SymEngine::str(*e.get_basic());
                 });
 }
