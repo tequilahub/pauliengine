@@ -1,0 +1,160 @@
+name: Publish PauliEngine Python sdist and wheels to PyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      force-upload:
+        description: 'Upload artifacts without a corresponding release'
+        required: false
+        default: false
+        type: boolean
+  release:
+    types:
+      - published
+  pull_request:
+    # PRs trigger for the "opened", "reopened", "synchronize" events (default) and
+    # "ready_for_review"
+    paths:
+      - .github/workflows/deploy.yml
+    types:
+      - opened
+      - reopened
+      - synchronize # when new commits are pushed to the PR
+      - ready_for_review # when the PR is un-drafted
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  COLUMNS: 120
+  FORCE_COLOR: 3
+
+jobs:
+  build-sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # such that setuptools_scm can do its job correctly
+
+      - name: Build SDist
+        run: |
+          pipx install uv
+          pipx run build --verbose --sdist --installer=uv
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: cibw-sdist
+          path: dist/*.tar.gz
+
+  build-wheels:
+    # in combination with the PR types selection, this top-level if statement
+    # skips running the workflow for Draft PRs
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
+    name: Build Python wheels for ${{ matrix.os }}
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      matrix:
+        os: [ linux-intel, linux-arm, macos-arm, windows-intel, windows-arm]
+        include:
+          - archs: native
+            platform: auto
+          - os: linux-intel
+            runs-on: ubuntu-latest
+          - os: linux-arm
+            runs-on: ubuntu-24.04-arm
+          - os: macos-arm
+            runs-on: macos-latest
+          - os: windows-intel
+            runs-on: windows-latest
+          - os: windows-arm
+            runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: pypa/cibuildwheel@v3.3.1
+        with:
+          extras: "uv"
+        env:
+          # target platform
+          CIBW_PLATFORM: ${{ matrix.platform }}
+          # architectures to build
+          CIBW_ARCHS: ${{ matrix.archs }}
+          # use uv and build
+          CIBW_BUILD_FRONTEND: "build[uv]"
+          # increase pip debugging output
+          CIBW_BUILD_VERBOSITY: 1
+          CIBW_DEBUG_TRACEBACK: TRUE
+          CIBW_BEFORE_ALL_LINUX: |
+            dnf install -y ninja-build
+            # install conan and C++ dependencies for the project
+            pip install conan
+            conan profile detect --force
+
+            # install symengine
+            conan install .  --output-folder=build --build=missing -pr ./conan_profile  
+          CIBW_BEFORE_ALL_MACOS: |
+            # install conan and C++ dependencies for the project
+            pip install conan
+            conan profile detect --force 
+
+            # install symengine
+            conan install .  --output-folder=build --build=missing -pr ./conan_profile
+          CIBW_BEFORE_ALL_WINDOWS: |
+            pip install delvewheel conan && conan profile detect --force && conan install . --output-folder=build --build=missing -pr conan_profile 
+          # do not activate architecture-dependent compiler flags
+          # 4 jobs in parallel, but do not start new ones if load average exceeds 5
+          CIBW_ENVIRONMENT_LINUX: 
+            CMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake
+            CIBW="true"
+            SKBUILD_BUILD_TOOL_ARGS="-j4;-l5"
+          # set deployment target for C++20 compatibility
+          # do not activate architecture-dependent compiler flags
+          # 4 jobs in parallel, but do not start new ones if load average exceeds 5
+          CIBW_ENVIRONMENT_MACOS: >
+            CIBW="true"
+            MACOSX_DEPLOYMENT_TARGET=15.0
+            SKBUILD_BUILD_TOOL_ARGS="-j4;-l5"
+          CIBW_ENVIRONMENT_WINDOWS: >
+            CIBW="true"
+            SKBUILD_BUILD_TOOL_ARGS="/m:4"
+            CMAKE_TOOLCHAIN_FILE=build\conan_toolchain.cmake
+          # build 3.10, 3.11, 3.12, 3.13 (with GIL), and 3.14 (with GIL)
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
+          # skip musl builds, and PyPy builds
+          CIBW_SKIP: "*-musllinux_*"
+          # use abi3audit to catch issues with Limited API wheels
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: |
+            auditwheel repair -w {dest_dir} {wheel}
+            if [[ "{wheel}" == *abi3* ]]; then
+              pipx run abi3audit --strict --report {wheel}
+            else
+              echo "{wheel} is not abi3, skipping abi3audit"
+            fi
+          # use abi3audit to catch issues with Limited API wheels
+          CIBW_REPAIR_WHEEL_COMMAND_MACOS: |
+            delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}
+            if [[ "{wheel}" == *abi3* ]]; then
+              pipx run abi3audit --strict --report {wheel}
+            else
+              echo "{wheel} is not abi3, skipping abi3audit"
+            fi
+          CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: |
+            delvewheel repair -w {dest_dir} {wheel}
+            if [[ "{wheel}" == *abi3* ]]; then
+              pipx run abi3audit --strict --report {wheel}
+            else
+              echo "{wheel} is not abi3, skipping abi3audit"
+            fi
+          CIBW_TEST_COMMAND: python -m pytest {package}/tests
+          CIBW_TEST_GROUPS: "test"
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v6
+        with:
+          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          path: wheelhouse/*.whl

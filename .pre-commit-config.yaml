@@ -1,0 +1,35 @@
+default_language_version:
+  python: python3
+
+default_stages: [pre-commit, pre-push]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-toml
+      - id: destroyed-symlinks
+      - id: end-of-file-fixer
+      - id: forbid-submodules
+      - id: no-commit-to-branch
+        args: ['--pattern', '[^a-zA-Z0-9_\/-]']
+      - id: trailing-whitespace
+
+  - repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: v0.11.7
+    hooks:
+      - id: ruff
+      # Run the Ruff formatter.
+      - id: ruff-format
+        args: [--check]
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    # uv version.
+    rev: 0.7.7
+    hooks:
+      - id: uv-lock

@@ -1,47 +1,54 @@
-cmake_minimum_required(VERSION 3.15...3.27)
-cmake_policy(SET CMP0091 NEW)
-
-project(PauliEngine LANGUAGES CXX)
-
-# Standardkonfiguration
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-
-if (CMAKE_VERSION VERSION_LESS 3.18)
-    set(DEV_MODULE Development)
-else()
-    set(DEV_MODULE Development.Module)
+# transform pauliengine_CXX_FLAGS and EXTRA_CXXFLAGS to ;-separated lists
+message(STATUS "pauliengine_CXX_FLAGS : ${pauliengine_CXX_FLAGS}")
+if(DEFINED pauliengine_CXX_FLAGS)
+  string(REPLACE " " ";" pauliengine_CXX_FLAGS ${pauliengine_CXX_FLAGS})
+endif()
+if(DEFINED EXTRA_CXXFLAGS)
+  string(REPLACE " " ";" EXTRA_CXXFLAGS ${EXTRA_CXXFLAGS})
 endif()
 
-if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
-    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
-endif()
+# create object library for core pauliengine functionality
+add_library(
+  pauliengine-objs 
+  OBJECT
+  QubitHamiltonian.cpp)
 
-# Conan Toolchain einbinden (nach: conan install .. --install-folder=build --build=missing)
-include(${CMAKE_BINARY_DIR}/conan_toolchain.cmake OPTIONAL RESULT_VARIABLE _found)
+# target_include_directories(pauliengine-objs INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(
+  pauliengine-objs
+  PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+)
 
-# Python & SymEngine
-find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
-find_package(SymEngine REQUIRED CONFIG)
-
-# Nanobind einbinden
-add_subdirectory(nanobind)
-
-# Header-only Bibliothek definieren
-add_library(pauli_string INTERFACE)
-target_include_directories(pauli_string INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+# find_package(SymEngine REQUIRED CONFIG) 
+find_package(SymEngine CONFIG) 
 
 if (SymEngine_FOUND)
-    target_compile_definitions(pauli_string INTERFACE HAVE_SYMENGINE)
-    target_link_libraries(pauli_string INTERFACE symengine)
+    target_compile_definitions(pauliengine-objs PUBLIC HAVE_SYMENGINE)
+    # target_link_libraries(pauliengine-objs PUBLIC symengine gmp)
+    target_link_libraries(pauliengine-objs PUBLIC symengine)
+endif()
+    
+# flags to prepend
+target_compile_options(
+  pauliengine-objs
+  BEFORE
+  PUBLIC
+    "${pauliengine_CXX_FLAGS}"
+    "${ARCH_FLAG}"
+)
+
+# flags to append
+target_compile_options(pauliengine-objs PUBLIC "${EXTRA_CXXFLAGS}")
+
+if(DEFINED SKBUILD)
+  add_subdirectory(bindings)
+# else()
+  # if you want to compile some local C++ executable for testing
+  # if (SymEngine_FOUND)
+      # add_executable(example.x example.cpp)
+      # target_compile_definitions(example.x PUBLIC HAVE_SYMENGINE)
+  # endif()
 endif()
 
-# Python-Modul erstellen
-nanobind_add_module(PauliEngine 
-    QubitHamiltonian.cpp 
-)
-
-target_link_libraries(PauliEngine PRIVATE 
-    pauli_string
-)
