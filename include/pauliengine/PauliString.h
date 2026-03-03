@@ -65,11 +65,11 @@ class PauliString {
                  * @param pauli_string : A string representation of the Pauli string.
                  * @param coeff : The coefficient associated with the Pauli string.
                  */
-                PauliString(const std::string &pauli_string, Coeff &coeff){
+                PauliString(Coeff &coeff, const std::string &pauli_string){
                         this->coeff = coeff;
                         uint64_t mask;
                         for (size_t i = 0; i < pauli_string.size(); i++) {
-                                get_symplectic_form(i, mask, pauli_string[i]);
+                                get_symplectic_form(i, mask, std::string(1, pauli_string[i]));
                         }
                 }
 

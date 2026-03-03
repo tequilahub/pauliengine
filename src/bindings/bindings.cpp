@@ -20,12 +20,13 @@ NB_MODULE(_core, m) {
         m.attr("__compiler_flags__") = compiler_flags();
 
         // PauliString for complex coefficients
-        nb::class_<PauliString<std::complex<double>>>(m, "PauliString", "Represents a Pauli string in binary symplectic form.")
+        nb::class_<PauliString<std::complex<double>>>(m, "PauliStringComplex", "Represents a Pauli string in binary symplectic form.")
                 .def(nb::init<>(), "Default constructor.")
                 .def(nb::init<std::complex<double>, const std::unordered_map<int, std::string>&>(),
                 "Constructor from a map of qubit indices to Pauli operators and a complex coefficient.")
-                .def(nb::init<const std::pair<std::complex<double>, std::vector<std::pair<char, int>>>>(),
-                "Constructor OpenFermion style and a complex coefficient.")
+                .def(nb::init<const std::pair<std::complex<double>, std::vector<std::pair<char, int>>>>(), "Constructor OpenFermion style and a complex coefficient.")
+                .def(nb::init<std::complex<double>&, const std::string&>(),
+                "Constructor from a string representation of the Pauli string and a complex coefficient.")
                 .def("to_string", &PauliString<std::complex<double>>::to_string, "Returns a human-readable string representation of the Pauli string.")
                 .def("is_all_z", &PauliString<std::complex<double>>::is_all_z, "Checks if the Pauli string consists only of Z operators.")
                 .def("get_coeff", &PauliString<std::complex<double>>::get_coeff, "Returns the complex coefficient of the Pauli string.")
@@ -55,7 +56,7 @@ NB_MODULE(_core, m) {
                 .def_ro("is_zero", &PauliString<std::complex<double>>::is_zero, "Returns whether the Pauli string is zero.");
 
         // PauliString for SymEngine::Expression coefficients
-        nb::class_<PauliString<SymEngine::Expression>>(m, "PauliStringSym", "Represents a Pauli string in binary symplectic form.")
+        nb::class_<PauliString<SymEngine::Expression>>(m, "PauliStringSymbolic", "Represents a Pauli string in binary symplectic form.")
                 .def(nb::init<>(), "Default constructor.")
                 .def(nb::init<SymEngine::Expression, const std::unordered_map<int, std::string>&>(),
                 "Constructor from a map of qubit indices to Pauli operators and a complex coefficient.")
