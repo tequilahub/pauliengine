@@ -21,8 +21,8 @@ class PauliStringFactory:
 
     def __call__(
         self,
-        coeff: complex | None = 0,
-        pauli_strings: str | dict[int, str] | None = {0: "I"},
+        coeff: complex | str = 0,
+        pauli_strings: str | dict[int, str] = {0: "I"},
     ) -> PauliStringComplex | PauliStringSymbolic:
         """Creates an instance of the specified type."""
         arg_type = type(coeff)
