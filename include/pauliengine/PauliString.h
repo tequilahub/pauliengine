@@ -78,12 +78,11 @@ class PauliString {
                         return x == other.x && y == other.y;
                 }
 
-
-                PauliString &operator*=(const PauliString& other) {
+                PauliString operator*(const PauliString& other) const {
                         // Source: https://arxiv.org/pdf/2103.02202 figure 12
 
-                        uint64_t *x1 = x.data();
-                        uint64_t *y1 = y.data();
+                        std::vector<uint64_t> x1 = x;
+                        std::vector<uint64_t> y1 = y;
                         const uint64_t *x2 = other.x.data();
                         const uint64_t *y2 = other.y.data();
                         size_t n1 = x.size();
@@ -108,29 +107,29 @@ class PauliString {
                         }
 
                         // Update coefficient accounting for factors of i gained from Pauli multiplications.
-                        coeff *= other.coeff;
+                        auto new_coeff = this->coeff * other.coeff;
                         int power_of_i = 2 * std::popcount(c2) - std::popcount(c1);
                         if (power_of_i & 1) {
-                            coeff *= std::complex<double>(0.0, 1.0);
+                            new_coeff *= std::complex<double>(0.0, 1.0);
                         }
                         if (power_of_i & 2) {
-                            coeff = -coeff;
+                            new_coeff = -new_coeff;
                         }
 
                         // Automatically extend length if needed.
                         if (n1 < n2) {
-                            x.insert(x.end(), x2 + n1, x2 + n2);
-                            y.insert(y.end(), y2 + n1, y2 + n2);
+                            x1.insert(x1.end(), x2 + n1, x2 + n2);
+                            y1.insert(y1.end(), y2 + n1, y2 + n2);
                         }
 
                         // DIDNTDO: update is_zero (because the old code didn't?)
 
-                        return *this;
+                        return PauliString(x1, y1, new_coeff);
                 }
-                PauliString operator*(const PauliString& other) const {
-                        PauliString copy = *this;
-                        copy *= other;
-                        return copy;
+
+                PauliString &operator*=(const PauliString& other) {
+                        *this = *this * other;
+                        return *this;
                 }
 
                 PauliString operator*(const std::complex<double> scalar){
@@ -443,6 +442,10 @@ class PauliString {
 
 };
 
+template<typename T, typename U, typename V = decltype(T() * U())>
+inline auto operator*(const PauliString<T>& left_op, const PauliString<U>& right_op) {
+    return PauliString<V>(left_op.x, left_op.y, static_cast<V>(left_op.coeff)) * PauliString<V>(right_op.x, right_op.y, static_cast<V>(right_op.coeff));
+}
 
 template<typename Coeff>
 struct PauliStringHash {

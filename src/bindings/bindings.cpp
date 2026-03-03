@@ -33,10 +33,13 @@ NB_MODULE(_core, m) {
                 .def("commutator", &PauliString<std::complex<double>>::commutator, "Computes the commutator with another Pauli string.")
                 .def("map_qubits", &PauliString<std::complex<double>>::map_qubits, "Remaps qubit indices according to a given mapping.")
                 .def("__mul__", nb::overload_cast<const PauliString<std::complex<double>>&>(&PauliString<std::complex<double>>::operator*, nb::const_), "Multiply two PauliStrings")
-                // TODO: Implement multiplication for PauliString with SymEngine::Expression coeff.
+                // Type homogeneous multiplication.
                 .def("__mul__", nb::overload_cast<const std::complex<double>>(&PauliString<std::complex<double>>::operator*), "Scale PauliString by complex scalar")
                 .def("__imul__", nb::overload_cast<const std::complex<double>>(&PauliString<std::complex<double>>::operator*=), "In-place scale")
                 .def("__imul__", nb::overload_cast<const PauliString<std::complex<double>>&>(&PauliString<std::complex<double>>::operator*=), "In-place multiply")
+                // Type heterogeneous multiplication with SymEngine::Expression.
+                .def("__mul__", [](const PauliString<std::complex<double>>& ps1, const PauliString<SymEngine::Expression>& ps2){return ps1 * ps2;}, "Multiply PauliString with complex coefficient by PauliString with SymEngine::Expression coefficient")
+                .def("__rmul__", [](const PauliString<SymEngine::Expression>& ps1, const PauliString<std::complex<double>>& ps2){return ps2 * ps1;}, "Multiply PauliString with complex coefficient by PauliString with SymEngine::Expression coefficient")
                 .def("__repr__",  &PauliString<std::complex<double>>::to_string, "Returns a human-readable string representation of the Pauli string.")
                 .def("__str__",  &PauliString<std::complex<double>>::to_string, "Returns a human-readable string representation of the Pauli string.")
                 .def("__eq__", &PauliString<std::complex<double>>::equals, "Checks if 2 PauliStrings have same data and Coefficient")
@@ -64,10 +67,14 @@ NB_MODULE(_core, m) {
                 .def("to_dictionary", &PauliString<SymEngine::Expression>::to_dictionary, "Converts the Pauli string to a dictionary with coefficient and operators.")
                 .def("commutator", &PauliString<SymEngine::Expression>::commutator, "Computes the commutator with another Pauli string.")
                 .def("map_qubits", &PauliString<SymEngine::Expression>::map_qubits, "Remaps qubit indices according to a given mapping.")
+                // Type homogeneous multiplication.
                 .def("__mul__", nb::overload_cast<const PauliString<SymEngine::Expression>&>(&PauliString<SymEngine::Expression>::operator*, nb::const_), "Multiply two PauliStrings")
                 .def("__mul__", nb::overload_cast<const std::complex<double>>(&PauliString<SymEngine::Expression>::operator*), "Scale PauliString by complex scalar")
                 .def("__imul__", nb::overload_cast<const std::complex<double>>(&PauliString<SymEngine::Expression>::operator*=), "In-place scale")
                 .def("__imul__", nb::overload_cast<const PauliString<SymEngine::Expression>&>(&PauliString<SymEngine::Expression>::operator*=), "In-place multiply")
+                // Type heterogeneous multiplication with complex coefficients.
+                .def("__mul__", [](const PauliString<SymEngine::Expression>& ps1, const PauliString<std::complex<double>>& ps2){return ps1 * ps2;}, "Multiply PauliString with SymEngine::Expression coefficient by PauliString with complex coefficient")
+                .def("__rmul__", [](const PauliString<std::complex<double>>& ps1, const PauliString<SymEngine::Expression>& ps2){return ps2 * ps1;}, "Multiply PauliString with SymEngine::Expression coefficient by PauliString with complex coefficient")
                 .def("__repr__",  &PauliString<SymEngine::Expression>::to_string, "Returns a human-readable string representation of the Pauli string.")
                 .def("__str__",  &PauliString<SymEngine::Expression>::to_string, "Returns a human-readable string representation of the Pauli string.")
                 .def("__eq__", &PauliString<SymEngine::Expression>::equals, "Checks if 2 PauliStrings have same data and Coefficient")
