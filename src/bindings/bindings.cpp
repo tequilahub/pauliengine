@@ -92,7 +92,7 @@ NB_MODULE(_core, m) {
                 .def_ro("is_zero", &PauliString<SymEngine::Expression>::is_zero, "Returns whether the Pauli string is zero.");
 
         // QubitHamiltonian for complex coefficients
-        nb::class_<QubitHamiltonian<std::complex<double>>>(m, "QubitHamiltonian", "Represents a Hamiltonian as a sum of Pauli strings.")
+        nb::class_<QubitHamiltonian<std::complex<double>>>(m, "QubitHamiltonianComplex", "Represents a Hamiltonian as a sum of Pauli strings.")
                 .def(nb::init<const std::vector<PauliString<std::complex<double>>>&>(), "Constructor from a vector of Pauli strings.")
                 .def(nb::init<const Hamiltonian_structure<std::complex<double>>&>(), "Constructor from a Hamiltonian structure (coefficient and operator map).")
                 .def("__add__", &QubitHamiltonian<std::complex<double>>::operator+, "Adds two Hamiltonians.")
@@ -105,7 +105,7 @@ NB_MODULE(_core, m) {
                 .def("__repr__",&QubitHamiltonian<std::complex<double>>::to_string, "Returns a human-readable string representation of the QubitHamiltonian operator.");
 
         // QubitHamiltonian for SymEngine::Expression coefficients
-        nb::class_<QubitHamiltonian<SymEngine::Expression>>(m, "QubitHamiltonianSym", "Represents a Hamiltonian as a sum of Pauli strings.")
+        nb::class_<QubitHamiltonian<SymEngine::Expression>>(m, "QubitHamiltonianSymbolic", "Represents a Hamiltonian as a sum of Pauli strings.")
                 .def(nb::init<const std::vector<PauliString<SymEngine::Expression>>&>(), "Constructor from a vector of Pauli strings.")
                 .def(nb::init<const Hamiltonian_structure<SymEngine::Expression>&>(), "Constructor from a Hamiltonian structure (coefficient and operator map).")
                 .def("__add__", &QubitHamiltonian<SymEngine::Expression>::operator+, "Adds two Hamiltonians.")
