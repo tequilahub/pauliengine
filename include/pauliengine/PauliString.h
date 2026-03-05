@@ -334,10 +334,16 @@ class PauliString {
                 }
 
                 std::string get_pauli_from_index(int index) {
+                        if (index < 0) {
+                                return "I";
+                        }
                         uint64_t position = index / BITS_IN_INTEGER;
+                        if (position >= this->x.size() || position >= this->y.size()) {
+                                return "I";
+                        }
                         uint64_t mask = (uint64_t) 1 << (index % BITS_IN_INTEGER);
-                        uint64_t x_bit = (this->x[index] & mask) == mask;
-                        uint64_t y_bit = (this->y[index] & mask) == mask;
+                        uint64_t x_bit = (this->x[position] & mask) == mask;
+                        uint64_t y_bit = (this->y[position] & mask) == mask;
                         if (x_bit && y_bit) {
                                 return "Z";
                         } else if(x_bit) {
@@ -425,9 +431,9 @@ class PauliString {
 
                 void get_symplectic_form(size_t pauli_index, uint64_t& mask, const std::string& pauli_char) {
                         size_t index = pauli_index / BITS_IN_INTEGER;
-                        if ((index) + 1 > x.size()) {
-                                x.push_back(0);
-                                y.push_back(0);
+                        if (x.size() <= index) {
+                                x.resize(index + 1, 0);
+                                y.resize(index + 1, 0);
                         }
                         mask = ((uint64_t) 1 <<  pauli_index % BITS_IN_INTEGER);
 
