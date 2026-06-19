@@ -7,7 +7,7 @@ fully symbolic (SymEngine).
 See [arXiv:2601.02233](https://arxiv.org/abs/2601.02233) for the algorithmic
 background.
 
-> **Status.** Functional core with a large test suite (~335 tests). The Python
+> **Status.** Functional core with a large test suite. The Python
 > API surface is stable. PyPI wheels and Sphinx docs are not published yet.
 
 ---
