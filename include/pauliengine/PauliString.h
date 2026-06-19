@@ -17,7 +17,7 @@ using SymEngine::Expression;
 
 #define BITS_IN_INTEGER (sizeof(uint64_t) * 8)
 
-const std::complex<double> Unit_matrix(0.0 , 1.0);
+const std::complex<double> I(0.0 , 1.0);
 
 inline int popcount(uint64_t x);
 void testSymengine();
@@ -36,8 +36,12 @@ class PauliString {
                 PauliString() = default;
 
                 PauliString(const std::vector<uint64_t>& x, const std::vector<uint64_t>& y, Coeff coeff) {
-                        this->x = x;
-                        this->y = y;
+                        size_t n = std::min(x.size(), y.size());
+                        while (n > 0 && x[n - 1] == 0 && y[n - 1] == 0) {
+                                --n;
+                        }
+                        this->x.assign(x.begin(), x.begin() + n);
+                        this->y.assign(y.begin(), y.begin() + n);
                         this->coeff = coeff;
                 }
 
@@ -75,7 +79,15 @@ class PauliString {
 
 
                 uint64_t operator==(const PauliString& other) const {
-                        return x == other.x && y == other.y;
+                        if (!((this->x == other.x) && (this->y == other.y))) {
+                                return false;
+                        }
+                        if constexpr (std::is_same<Coeff, std::complex<double>>::value) {
+                                return this->coeff == other.coeff;
+                        } else {
+                                return (this->coeff - other.coeff) == 0;
+
+                        }
                 }
 
                 PauliString operator*(const PauliString& other) const {
@@ -116,13 +128,10 @@ class PauliString {
                             new_coeff = -new_coeff;
                         }
 
-                        // Automatically extend length if needed.
                         if (n1 < n2) {
                             x1.insert(x1.end(), x2 + n1, x2 + n2);
                             y1.insert(y1.end(), y2 + n1, y2 + n2);
                         }
-
-                        // DIDNTDO: update is_zero (because the old code didn't?)
 
                         return PauliString(x1, y1, new_coeff);
                 }
@@ -132,9 +141,18 @@ class PauliString {
                         return *this;
                 }
 
-                PauliString operator*(const std::complex<double> scalar){
+                PauliString operator*(const std::complex<double> scalar) const {
                         return PauliString(this->x, this->y, this->coeff * scalar);
                 }
+
+                PauliString operator*(const int scalar) const {
+                        return PauliString(this->x, this->y, this->coeff * static_cast<double>(scalar));
+                }
+
+                PauliString operator*(const double scalar) const {
+                        return PauliString(this->x, this->y, this->coeff * scalar);
+                }
+
 
 
                 PauliString& operator*=(const std::complex<double> scalar)  {
@@ -142,7 +160,7 @@ class PauliString {
                         return *this;
                 }
 
-                uint64_t is_all_z() {
+                uint64_t is_all_z() const {
                         for (size_t i = 0; i < this->x.size(); i++) {
                                 if (this->x[i] != this->y[i]) {
                                         return false;
@@ -151,7 +169,36 @@ class PauliString {
                         return true;
                 }
 
-                Pauli_structure to_dictionary() {
+                // Number of qubits with non-identity operator.
+                size_t size() const {
+                        size_t count = 0;
+                        for (size_t i = 0; i < this->x.size(); i++) {
+                                count += std::popcount(this->x[i] | this->y[i]);
+                        }
+                        return count;
+                }
+
+                // Number of Y operators (x bit = 0, y bit = 1).
+                int count_y() const {
+                        int y_count = 0;
+                        for (size_t i = 0; i < this->x.size(); i++) {
+                                y_count += std::popcount(~this->x[i] & this->y[i]);
+                        }
+                        return y_count;
+                }
+
+                // Return a copy with coefficient set to 1.
+                PauliString naked() const {
+                        Coeff one;
+                        if constexpr (std::is_same_v<Coeff, std::complex<double>>) {
+                                one = std::complex<double>(1.0, 0.0);
+                        } else {
+                                one = Coeff(1);
+                        }
+                        return PauliString(this->x, this->y, one);
+                }
+
+                Pauli_structure to_dictionary() const {
                         std::unordered_map<int, std::string> temp;
                         temp.reserve(this->x.size() * BITS_IN_INTEGER / 2);
                         for (size_t i = 0; i < this->x.size(); ++i) {
@@ -175,14 +222,23 @@ class PauliString {
                         return {this->coeff, temp};
                 }
 
-                PauliString map_qubits(std::unordered_map<int, int> qubit_map) {
-                        Pauli_structure result_parsed = this->to_dictionary();
+                PauliString map_qubits(std::unordered_map<int, int> qubit_map) const {
+                        const auto& current_ops = this->to_dictionary().second;
+
+                        // For each explicit A→B: if B is occupied and B is not itself a
+                        // source in qubit_map, implicitly add B→A (swap instead of overwrite).
+                        std::unordered_map<int, int> effective_map = qubit_map;
+                        for (const auto& [from, to] : qubit_map) {
+                                if (current_ops.count(to) > 0 && qubit_map.count(to) == 0) {
+                                        effective_map[to] = from;
+                                }
+                        }
+
                         std::unordered_map<int, std::string> mapped;
-                        for (const auto& [old_idx, pauli_char] : result_parsed.second) {
-                                auto it = qubit_map.find(old_idx);
-                                if (it != qubit_map.end()) {
-                                        int new_idx = it->second;
-                                        mapped[new_idx] = pauli_char;
+                        for (const auto& [old_idx, pauli_char] : current_ops) {
+                                auto it = effective_map.find(old_idx);
+                                if (it != effective_map.end()) {
+                                        mapped[it->second] = pauli_char;
                                 } else {
                                         mapped[old_idx] = pauli_char;
                                 }
@@ -194,12 +250,9 @@ class PauliString {
                         std::ostringstream oss;
                         size_t num_qubits = x.size() * BITS_IN_INTEGER;
 
-                        // if Coeff is complex
                         if constexpr (std::is_same<Coeff, std::complex<double>>::value) {
                                 oss << std::to_string(this->coeff.real()) + " + " + std::to_string(this->coeff.imag()) + "i : ";
-                        }
-                        // if is SymEngine::Expression this should be enough
-                        else {
+                        } else {
                                 oss << str(this->coeff) << " : ";
                         }
 
@@ -255,48 +308,118 @@ class PauliString {
                                 return PauliString(new_x, new_y, 0);
                         }
                         for (int i = 0; i < tau % 4; i++) {
-                                coeff_new *= Unit_matrix;
+                                coeff_new *= std::complex<double>(0.0 , 1.0);
                         }
                         return PauliString(new_x, new_y,  coeff_temp * (coeff_new * 2.0));
 
                 }
 
                 Coeff get_coeff() const {
-                                return this->coeff;
+                                
+                        return this->coeff;
                 }
 
                 void set_coeff(Coeff new_coeff) {
                         this->coeff = new_coeff;
                 }
 
-                PauliString trace_out_qubits(const std::vector<int>& qubits, const std::vector<int>& state) {
-                        double factor = 1.0;
-                        std::vector<uint64_t> x_y(this->x.size());
-                        for (size_t i = 0; i < this->x.size() ; i++) {
-                                x_y[i] = this->x[i] ^ this->y[i];
+                // Project this Pauli string onto a computational-basis state
+                // for the listed qubits. state[i] = 0 means qubit `qubits[i]` is
+                // |0>, state[i] = 1 means |1>. Returns a NEW PauliString with the
+                // traced qubits removed;
+                //
+                // Rules per traced qubit q:
+                //   - I:  <s|I|s> = 1                 → keep as-is
+                //   - X:  <0|X|0> = <1|X|1> = 0       → result is 0
+                //   - Y:  <0|Y|0> = <1|Y|1> = 0       → result is 0
+                //   - Z:  <0|Z|0> = +1, <1|Z|1> = -1  → drop the Z, sign-flip if state=1
+                PauliString trace_out_qubits(const std::vector<int>& qubits, const std::vector<int>& state) const {
+                        if (qubits.size() != state.size()) {
+                                throw std::runtime_error("trace_out_qubits: qubits and state must have the same length");
                         }
-                        uint64_t mask;
+
+                        std::vector<uint64_t> new_x = this->x;
+                        std::vector<uint64_t> new_y = this->y;
+                        double sign = 1.0;
+
                         for (size_t i = 0; i < qubits.size(); i++) {
-                                mask = (uint64_t) 1 << (qubits[i] % BITS_IN_INTEGER);
-                                if ((x_y[qubits[i] / BITS_IN_INTEGER] & mask) == mask) {
+                                size_t word = qubits[i] / BITS_IN_INTEGER;
+                                if (word >= new_x.size()) {
+                                        // Qubit beyond stored range = identity, nothing to do.
+                                        continue;
+                                }
+                                uint64_t mask = (uint64_t)1 << (qubits[i] % BITS_IN_INTEGER);
+                                bool x_bit = (new_x[word] & mask) != 0;
+                                bool y_bit = (new_y[word] & mask) != 0;
+
+                                if (x_bit != y_bit) {
+                                        // X (x=1,y=0) or Y (x=0,y=1) → expectation value is 0.
                                         return PauliString();
                                 }
-                        }
-                        std::vector<uint64_t> z(this->x.size());
-                        for (size_t i = 0; i < this->x.size() ; i++) {
-                                z[i] = this->x[i] & this->y[i];
-                        }
-                        for (size_t i = 0; i < qubits.size(); i++) {
-                                mask = (uint64_t) 1 << (qubits[i] % BITS_IN_INTEGER);
-                                if ((z[qubits[i] / BITS_IN_INTEGER] & mask) == mask) {
-                                        if (state[i] == 1) {
-                                                factor *= -1.0;
+                                if (x_bit && y_bit) {
+                                        // Z on this qubit. Sign-flip if |1>, then remove the operator.
+                                        if (state[i] != 0) {
+                                                sign *= -1.0;
                                         }
-                                        this->x[qubits[i] / BITS_IN_INTEGER] -= mask;
-                                        this->y[qubits[i] / BITS_IN_INTEGER] -= mask;
+                                        new_x[word] &= ~mask;
+                                        new_y[word] &= ~mask;
                                 }
+                                // else: identity → nothing to do.
                         }
-                        return PauliString(this->x, this->y, this->coeff * factor);
+
+                        return PauliString(new_x, new_y, this->coeff * sign);
+                }
+
+                // Project this Pauli string onto an arbitrary single-qubit state
+                // |psi_i> = a_i |0> + b_i |1> for each traced qubit. 
+                PauliString trace_out_qubits(
+                        const std::vector<int>& qubits,
+                        const std::vector<std::pair<std::complex<double>, std::complex<double>>>& states
+                ) const {
+                        if (qubits.size() != states.size()) {
+                                throw std::runtime_error("trace_out_qubits: qubits and states must have the same length");
+                        }
+
+                        std::vector<uint64_t> new_x = this->x;
+                        std::vector<uint64_t> new_y = this->y;
+                        std::complex<double> factor(1.0, 0.0);
+                        const std::complex<double> I_unit(0.0, 1.0);
+
+                        for (size_t i = 0; i < qubits.size(); i++) {
+                                size_t word = qubits[i] / BITS_IN_INTEGER;
+                                bool x_bit = false, y_bit = false;
+                                if (word < new_x.size()) {
+                                        uint64_t mask = (uint64_t)1 << (qubits[i] % BITS_IN_INTEGER);
+                                        x_bit = (new_x[word] & mask) != 0;
+                                        y_bit = (new_y[word] & mask) != 0;
+                                        new_x[word] &= ~mask;
+                                        new_y[word] &= ~mask;
+                                }
+
+                                const std::complex<double>& a = states[i].first;
+                                const std::complex<double>& b = states[i].second;
+                                std::complex<double> ac_b = std::conj(a) * b;
+                                std::complex<double> a_bc = a * std::conj(b);
+
+                                std::complex<double> expectation;
+                                if (!x_bit && !y_bit) {
+                                        // I: |a|^2 + |b|^2
+                                        expectation = std::norm(a) + std::norm(b);
+                                } else if (x_bit && !y_bit) {
+                                        // X: a* b + a b*
+                                        expectation = ac_b + a_bc;
+                                } else if (!x_bit && y_bit) {
+                                        // Y: -i a* b + i a b*
+                                        expectation = -I_unit * ac_b + I_unit * a_bc;
+                                } else {
+                                        // Z: |a|^2 - |b|^2
+                                        expectation = std::norm(a) - std::norm(b);
+                                }
+
+                                factor *= expectation;
+                        }
+
+                        return PauliString(new_x, new_y, this->coeff * factor);
                 }
 
                 std::vector<int> qubits() {
@@ -386,7 +509,7 @@ class PauliString {
                 }
 
                 bool equals(const PauliString& other) {
-                        return this->x == other.x && this->y == other.y && PauliString::to_complex(this->coeff) == PauliString::to_complex(other.coeff);
+                        return this->x == other.x && this->y == other.y;
                 }
 
                 static std::complex<double> to_complex(const std::complex<double>& expr) {
@@ -464,5 +587,16 @@ struct PauliStringHash {
             seed ^= std::hash<uint64_t>{}(val) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
         }
         return seed;
+    }
+};
+
+// Equality comparator that only compares the operator part (x and y vectors),
+// ignoring the coefficient.  Required so that hash maps keyed by PauliString
+// treat two terms with the same operator but different coefficients as the
+// same key — which is what compact() and QH::operator== need.
+template<typename Coeff>
+struct PauliStringOperatorEqual {
+    bool operator()(const PauliString<Coeff>& a, const PauliString<Coeff>& b) const {
+        return a.x == b.x && a.y == b.y;
     }
 };
