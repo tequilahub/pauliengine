@@ -1,6 +1,6 @@
 find_package(
   Python
-  3.11
+  3.10
   REQUIRED
   COMPONENTS
     Interpreter

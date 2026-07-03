@@ -4,14 +4,26 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "pauliengine"
-
-description = "TDA."
+description = "Fast arithmetics for quantum operators (Pauli strings & Hamiltonians)."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Leon Müller", email = "leon.mueller@student.uni-augsburg.de" },
+]
+keywords = [
+  "quantum",
+  "quantum-computing",
+  "pauli",
+  "hamiltonian",
+  "symbolic",
+  "physics",
+]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",
   "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
@@ -28,6 +40,11 @@ dynamic = ["version"]
 dependencies = [
   "numpy",
 ]
+
+[project.urls]
+Homepage = "https://github.com/tequilahub/pauliengine"
+Repository = "https://github.com/tequilahub/pauliengine"
+Issues = "https://github.com/tequilahub/pauliengine/issues"
 
 [dependency-groups]
 # test = ["pytest>=8.2.2,<9.0", "pytest-datadir"]
