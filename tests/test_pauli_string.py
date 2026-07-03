@@ -631,7 +631,6 @@ class TestPauliStringTraceGeneralStates:
         assert complex(traced.coeff) == pytest.approx(expected, abs=1e-12)
 
     def test_multi_qubit_product_of_expectations(self):
-        """X(0) Z(1) traced against (|+>, |1>) -> <X> * <Z> = 1 * -1."""
         ps = pe.PauliString(1.0, {0: "X", 1: "Z"})
         states = [(_INV_SQRT2, _INV_SQRT2), (0.0 + 0j, 1.0 + 0j)]
         assert complex(ps.trace_out_qubits([0, 1], states).coeff) == pytest.approx(-1.0 + 0j)
@@ -650,7 +649,6 @@ class TestPauliStringTraceGeneralStates:
             ps.trace_out_qubits([0, 1], [(1.0 + 0j, 0.0 + 0j)])
 
     def test_unnormalized_state_scales_factor(self):
-        """Tequila does NOT auto-normalize: state (2, 0) gives <I>=4, <Z>=4."""
         ps = pe.PauliString(1.0, {0: "Z"})
         traced = ps.trace_out_qubits([0], [(2.0 + 0j, 0.0 + 0j)])
         assert complex(traced.coeff) == pytest.approx(4.0 + 0j)

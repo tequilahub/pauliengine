@@ -36,6 +36,12 @@ class QubitHamiltonian{
                 this->compact();
         }
 
+
+        QubitHamiltonian(std::vector<PauliString<Coeff>>&& data){
+                this->data = std::move(data);
+                this->compact();
+        }
+
         QubitHamiltonian(const Hamiltonian_structure<Coeff>& data){
                 std::vector<PauliString<Coeff>> converted_data;
                 converted_data.reserve(data.size());
@@ -55,7 +61,7 @@ class QubitHamiltonian{
                 // The constructor runs compact() which drops zero-coefficient terms,
                 // including the sentinel default-constructed PauliString returned for
                 // tracing X/Y against a computational-basis state.
-                return QubitHamiltonian(reduced);
+                return QubitHamiltonian(std::move(reduced));
         }
 
         // Overload accepting arbitrary single-qubit amplitudes (a, b) for each
@@ -69,7 +75,7 @@ class QubitHamiltonian{
                 for (const PauliString<Coeff>& current : this->data) {
                         reduced.push_back(current.trace_out_qubits(qubits, states));
                 }
-                return QubitHamiltonian(reduced);
+                return QubitHamiltonian(std::move(reduced));
         }
         std::string to_string(){
                 std::string result = "";
@@ -105,15 +111,15 @@ class QubitHamiltonian{
                 return to_scale;
         }
 
-        QubitHamiltonian operator*(QubitHamiltonian other) const{
-                std::vector<PauliString<Coeff>> data;
-                data.reserve(this->data.size() * other.data.size());
-                for (auto &entry_first : this->data) {
-                        for (auto &entry_second : other.data) {
-                                data.push_back(entry_first * entry_second);
+        QubitHamiltonian operator*(const QubitHamiltonian& other) const{
+                std::vector<PauliString<Coeff>> product;
+                product.reserve(this->data.size() * other.data.size());
+                for (const auto& entry_first : this->data) {
+                        for (const auto& entry_second : other.data) {
+                                product.push_back(entry_first * entry_second);
                         }
                 }
-                return QubitHamiltonian(data);
+                return QubitHamiltonian(std::move(product));
         }
 
         QubitHamiltonian operator+(const QubitHamiltonian& other) const {
@@ -121,7 +127,7 @@ class QubitHamiltonian{
                 combined.reserve(this->data.size() + other.data.size());
                 combined.insert(combined.end(), this->data.begin(), this->data.end());
                 combined.insert(combined.end(), other.data.begin(), other.data.end());
-                return QubitHamiltonian(combined);  // constructor calls compact()
+                return QubitHamiltonian(std::move(combined));  // constructor calls compact()
         }
 
         QubitHamiltonian operator-(const QubitHamiltonian& other) const {
@@ -145,12 +151,19 @@ class QubitHamiltonian{
                 return first_data == second_data;
         }
 
-        QubitHamiltonian set_all_coeff(std::complex<double> value) {
+        QubitHamiltonian set_all_coeff(std::complex<double> value) const {
                 std::vector<PauliString<Coeff>> temp_data;
-                for (const auto &ps : data) {
-                        temp_data.push_back(PauliString(ps.x, ps.z, value));
+                temp_data.reserve(this->data.size());
+                Coeff coeff;
+                if constexpr (std::is_same_v<Coeff, std::complex<double>>) {
+                        coeff = value;
+                } else {
+                        coeff = Expression(value);
                 }
-                return QubitHamiltonian(temp_data);
+                for (const auto& ps : this->data) {
+                        temp_data.push_back(PauliString<Coeff>(ps.x, ps.y, coeff));
+                }
+                return QubitHamiltonian(std::move(temp_data));
         }
 
         QubitHamiltonian diff(std::string symbol) const{
@@ -161,15 +174,16 @@ class QubitHamiltonian{
                                 data.push_back(temp);
                         }
                 }
-                return QubitHamiltonian(data);
+                return QubitHamiltonian(std::move(data));
         }
 
         QubitHamiltonian substitute(const std::unordered_map<std::string, std::complex<double>>& substitution_map) const {
                 std::vector<PauliString<Coeff>> temp_data;
+                temp_data.reserve(this->data.size());
                 for (const auto &ps : data) {
                         temp_data.push_back(ps.substitute(substitution_map));
                 }
-                return QubitHamiltonian(temp_data);
+                return QubitHamiltonian(std::move(temp_data));
         }
 
 
@@ -177,17 +191,23 @@ class QubitHamiltonian{
                 using Map = std::unordered_map<PauliString<Coeff>, Coeff,
                         PauliStringHash<Coeff>, PauliStringOperatorEqual<Coeff>>;
                 Map merged;
+                merged.reserve(data.size());
                 for (const auto& ps : data) {
-                        merged[ps] = merged[ps] + ps.coeff;
+                        auto [it, inserted] = merged.try_emplace(ps, ps.coeff);
+                        if (!inserted) {
+                                it->second = it->second + ps.coeff;
+                        }
                 }
+
                 data.clear();
-                for (const auto& [ps, coeff] : merged) {
+                data.reserve(merged.size());
+                while (!merged.empty()) {
+                        auto node = merged.extract(merged.begin());
+                        const Coeff& coeff = node.mapped();
                         bool nonzero;
                         if constexpr (std::is_same_v<Coeff, std::complex<double>>) {
                                 nonzero = coeff != 0.0;
                         } else {
-                                // Use to_complex: throws for symbolic (non-zero by definition),
-                                // returns numeric value for fully evaluated expressions.
                                 try {
                                         auto c = PauliString<Coeff>::to_complex(coeff);
                                         nonzero = c != std::complex<double>(0.0, 0.0);
@@ -196,9 +216,8 @@ class QubitHamiltonian{
                                 }
                         }
                         if (nonzero) {
-                                PauliString<Coeff> new_ps = ps;
-                                new_ps.coeff = coeff;
-                                data.push_back(new_ps);
+                                node.key().coeff = coeff;
+                                data.push_back(std::move(node.key()));
                         }
                 }
                 return *this;  // avoids re-entering the constructor
@@ -237,23 +256,33 @@ class QubitHamiltonian{
                 return this->data;
         }
 
-        QubitHamiltonian commutator(QubitHamiltonian other) {
-                std::unordered_map<PauliString<Coeff>, Coeff, PauliStringHash<Coeff>> merged;
+        QubitHamiltonian commutator(const QubitHamiltonian& other) const {
+                using Map = std::unordered_map<PauliString<Coeff>, Coeff,
+                        PauliStringHash<Coeff>, PauliStringOperatorEqual<Coeff>>;
+                Map merged;
+                merged.reserve(this->data.size() * other.data.size());
                 for (const auto& ps_first : this->data) {
                         for (const auto& ps_second : other.data) {
                                 PauliString<Coeff> temp = ps_first.commutator(ps_second);
-                                merged[temp] = merged[temp] + temp.coeff;
+                                if constexpr (std::is_same_v<Coeff, std::complex<double>>) {
+                                        if (temp.coeff == std::complex<double>(0.0, 0.0)) continue;
+                                }
+                                auto [it, inserted] = merged.try_emplace(temp, temp.coeff);
+                                if (!inserted) {
+                                        it->second = it->second + temp.coeff;
+                                }
                         }
                 }
                 std::vector<PauliString<Coeff>> result;
-                for (const auto& [ps, coeff] : merged) {
-                        if(coeff != 0.0) {
-                                PauliString<Coeff> new_ps = ps;
-                                new_ps.coeff = coeff;
-                                result.push_back(new_ps);
+                result.reserve(merged.size());
+                while (!merged.empty()) {
+                        auto node = merged.extract(merged.begin());
+                        if (node.mapped() != Coeff(0.0)) {
+                                node.key().coeff = node.mapped();
+                                result.push_back(std::move(node.key()));
                         }
                 }
-                return QubitHamiltonian(result);
+                return QubitHamiltonian(std::move(result));
         }
 
         size_t size() const { return data.size(); }
@@ -350,7 +379,7 @@ class QubitHamiltonian{
                         }
                         result.push_back(PauliString<Coeff>(ps.x, ps.y, conj_coeff));
                 }
-                return QubitHamiltonian(result);
+                return QubitHamiltonian(std::move(result));
         }
 
         QubitHamiltonian conjugate() const {
@@ -369,7 +398,7 @@ class QubitHamiltonian{
                         }
                         result.push_back(PauliString<Coeff>(ps.x, ps.y, new_coeff));
                 }
-                return QubitHamiltonian(result);
+                return QubitHamiltonian(std::move(result));
         }
 
         QubitHamiltonian transpose() const {
@@ -383,7 +412,7 @@ class QubitHamiltonian{
                         }
                         result.push_back(PauliString<Coeff>(ps.x, ps.y, new_coeff));
                 }
-                return QubitHamiltonian(result);
+                return QubitHamiltonian(std::move(result));
         }
 
         QubitHamiltonian simplify(double threshold = 0.0) const {
@@ -402,7 +431,7 @@ class QubitHamiltonian{
                         }
                         if (keep) result.push_back(ps);
                 }
-                return QubitHamiltonian(result);
+                return QubitHamiltonian(std::move(result));
         }
 
         std::pair<QubitHamiltonian, QubitHamiltonian> split() const {
@@ -438,7 +467,7 @@ class QubitHamiltonian{
                                 anti_terms.push_back(PauliString<Coeff>(ps.x, ps.y, imag_coeff));
                         }
                 }
-                return {QubitHamiltonian(herm_terms), QubitHamiltonian(anti_terms)};
+                return {QubitHamiltonian(std::move(herm_terms)), QubitHamiltonian(std::move(anti_terms))};
         }
 
         QubitHamiltonian map_qubits(std::unordered_map<int, int> qubit_map) const {
@@ -447,7 +476,7 @@ class QubitHamiltonian{
                 for (auto ps : data) {
                         result.push_back(ps.map_qubits(qubit_map));
                 }
-                return QubitHamiltonian(result);
+                return QubitHamiltonian(std::move(result));
         }
 
         QubitHamiltonian power(int n) const {
