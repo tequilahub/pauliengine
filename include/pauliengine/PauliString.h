@@ -294,6 +294,7 @@ class PauliString {
                         // (x_a * y_b) XOR (x_b * y_a) is 1 at bit q. The strings
                         // commute overall iff the total number of anti-commuting
                         // qubits is even, i.e. the XOR-accumulator has even popcount.
+                        // Source: https://arxiv.org/pdf/2103.02202
                         const size_t min_length = std::min(this->x.size(), other.x.size());
                         uint64_t anti = 0;
                         for (size_t i = 0; i < min_length; i++) {
