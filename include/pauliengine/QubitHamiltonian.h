@@ -283,6 +283,7 @@ class QubitHamiltonian{
 
     private:
      
+        template <typename Cmp>
         void parallel_sort_data(Cmp cmp) {
 #ifdef PAULIENGINE_HAS_OPENMP
                 const int nthreads = omp_get_max_threads();
