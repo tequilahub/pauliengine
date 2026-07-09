@@ -9,6 +9,10 @@
 #include "pauliengine/QubitHamiltonian.h"
 #include "pauliengine/Info.h"
 
+#ifdef PAULIENGINE_HAS_OPENMP
+#include <omp.h>
+#endif
+
 namespace nb = nanobind;
 using namespace pauliengine;
 
@@ -18,6 +22,22 @@ NB_MODULE(_core, m) {
         m.doc() = "PauliEngine";
         m.attr("__build_type__") = std::string(build_type());
         m.attr("__compiler_flags__") = compiler_flags();
+
+        // OpenMP diagnostics — check these at runtime to verify the build
+        // actually picked up OpenMP. `__openmp__` reflects the compile-time
+        // guard, `__omp_max_threads__` reflects what OpenMP will actually use
+        // (respects OMP_NUM_THREADS env var).
+#ifdef PAULIENGINE_HAS_OPENMP
+        m.attr("__openmp__") = true;
+        m.def("__omp_max_threads__", []() { return omp_get_max_threads(); },
+              "Number of threads OpenMP would use for a parallel region.");
+        m.attr("__omp_version__") = _OPENMP;  // yyyymm date, e.g. 201511 = OpenMP 4.5
+#else
+        m.attr("__openmp__") = false;
+        m.def("__omp_max_threads__", []() { return 1; },
+              "Sequential build — always returns 1.");
+        m.attr("__omp_version__") = 0;
+#endif
 
         // PauliString for complex coefficients
         nb::class_<PauliString<std::complex<double>>>(m, "PauliStringComplex", "Represents a Pauli string in binary symplectic form.")

@@ -29,6 +29,11 @@ if (SymEngine_FOUND)
     # target_link_libraries(pauliengine-objs PUBLIC symengine gmp)
     target_link_libraries(pauliengine-objs PUBLIC symengine)
 endif()
+
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(pauliengine-objs PUBLIC OpenMP::OpenMP_CXX)
+    target_compile_definitions(pauliengine-objs PUBLIC PAULIENGINE_HAS_OPENMP)
+endif()
     
 # flags to prepend
 target_compile_options(

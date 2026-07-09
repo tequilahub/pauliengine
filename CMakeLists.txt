@@ -92,6 +92,16 @@ include(GNUInstallDirs)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR})
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
 
+# OpenMP is optional — code falls back to sequential loops when unavailable.
+# On macOS with AppleClang you may need to `brew install libomp` and set
+# OpenMP_ROOT to the Homebrew prefix before configuring.
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+  message(STATUS "OpenMP: enabled (spec ${OpenMP_CXX_SPEC_DATE}, ${OpenMP_CXX_FLAGS})")
+else()
+  message(STATUS "OpenMP: not found — building without parallel loops")
+endif()
+
 configure_file(
   ${PROJECT_SOURCE_DIR}/include/pauliengine/Info.h.in
   ${PROJECT_BINARY_DIR}/include/pauliengine/Info.h

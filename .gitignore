@@ -12,3 +12,9 @@ Thumbs.db
 config.json
 
 __pycache__/
+
+# Benchmark results are host-specific — CPU model, thread count, and
+# pauliengine version are baked into every JSON, so committing them would
+# cause spurious noise across machines.
+tools/benchmarks/results/*
+!tools/benchmarks/results/.gitkeep
