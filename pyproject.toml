@@ -130,6 +130,10 @@ wheel.py-api = "cp312"
 
 [tool.setuptools_scm]
 write_to = "src/pauliengine/_version.py"
+# PyPI/TestPyPI reject local version labels (+gHASH.dDATE). Tagged, clean
+# builds are unaffected; untagged/dirty builds get a plain .devN version
+# that the index accepts.
+local_scheme = "no-local-version"
 
 
 [tool.pytest.ini_options]
