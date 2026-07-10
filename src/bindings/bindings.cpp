@@ -104,8 +104,8 @@ NB_MODULE(_core, m) {
                 .def("__len__", &PauliString<std::complex<double>>::size, "Number of qubits with non-identity operator.")
                 .def("count_y", &PauliString<std::complex<double>>::count_y, "Number of Y operators in the Pauli string.")
                 .def("key_openfermion", &PauliString<std::complex<double>>::key_openfermion, "OpenFermion-style key as list of (Pauli, qubit) pairs.")
-                .def_ro("x", &PauliString<std::complex<double>>::x, "Returns the x vector of the Pauli string.")
-                .def_ro("y", &PauliString<std::complex<double>>::y, "Returns the y vector of the Pauli string.")
+                .def_prop_ro("x", [](const PauliString<std::complex<double>>& ps) { return ps.x.to_vector(); }, "Returns the x vector of the Pauli string.")
+                .def_prop_ro("y", [](const PauliString<std::complex<double>>& ps) { return ps.y.to_vector(); }, "Returns the y vector of the Pauli string.")
                 .def_ro("coeff", &PauliString<std::complex<double>>::coeff, "Returns the coefficient of the Pauli string.")
                 .def_ro("is_zero", &PauliString<std::complex<double>>::is_zero, "Returns whether the Pauli string is zero.");
 
@@ -175,8 +175,8 @@ NB_MODULE(_core, m) {
                 .def("__len__", &PauliString<SymEngine::Expression>::size, "Number of qubits with non-identity operator.")
                 .def("count_y", &PauliString<SymEngine::Expression>::count_y, "Number of Y operators in the Pauli string.")
                 .def("key_openfermion", &PauliString<SymEngine::Expression>::key_openfermion, "OpenFermion-style key as list of (Pauli, qubit) pairs.")
-                .def_ro("x", &PauliString<SymEngine::Expression>::x, "Returns the x vector of the Pauli string.")
-                .def_ro("y", &PauliString<SymEngine::Expression>::y, "Returns the y vector of the Pauli string.")
+                .def_prop_ro("x", [](const PauliString<SymEngine::Expression>& ps) { return ps.x.to_vector(); }, "Returns the x vector of the Pauli string.")
+                .def_prop_ro("y", [](const PauliString<SymEngine::Expression>& ps) { return ps.y.to_vector(); }, "Returns the y vector of the Pauli string.")
                 .def_ro("coeff", &PauliString<SymEngine::Expression>::coeff, "Returns the coefficient of the Pauli string.")
                 .def_ro("is_zero", &PauliString<SymEngine::Expression>::is_zero, "Returns whether the Pauli string is zero.");
 

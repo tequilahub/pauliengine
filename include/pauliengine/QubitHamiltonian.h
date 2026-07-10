@@ -226,28 +226,37 @@ class QubitHamiltonian{
         QubitHamiltonian compact(){
                 if (data.empty()) return *this;
 
-                // Sort-based compact.
+                size_t max_words = 0;
+                for (const auto& ps : data) max_words = std::max(max_words, ps.x.size());
+                if (try_compact_small_key<>(max_words)) {
+                        return *this;
+                }
+
+                // sort-based compact. Single-pass ordering: by word
+                // count first (constructors trim trailing zero words, so equal
+                // operators always have equal sizes), then by content.
                 auto op_less = [](const PauliString<Coeff>& a, const PauliString<Coeff>& b) {
-                        if (a.x != b.x) return a.x < b.x;
-                        return a.y < b.y;
+                        const size_t na = a.x.size();
+                        const size_t nb = b.x.size();
+                        if (na != nb) return na < nb;
+                        for (size_t i = 0; i < na; ++i) {
+                                if (a.x[i] != b.x[i]) return a.x[i] < b.x[i];
+                        }
+                        for (size_t i = 0; i < na; ++i) {
+                                if (a.y[i] != b.y[i]) return a.y[i] < b.y[i];
+                        }
+                        return false;
                 };
                 auto op_equal = [](const PauliString<Coeff>& a, const PauliString<Coeff>& b) {
                         return a.x == b.x && a.y == b.y;
                 };
 
-#ifdef PAULIENGINE_HAS_OPENMP
                 if constexpr (std::is_same_v<Coeff, std::complex<double>>) {
-                        if (data.size() >= PAULIENGINE_OMP_THRESHOLD) {
-                                parallel_sort_data(op_less);
-                        } else {
-                                std::sort(data.begin(), data.end(), op_less);
-                        }
+                        parallel_sort_vec(data, op_less);
                 } else {
+                        // symengine coefficients are not safe to move across threads
                         std::sort(data.begin(), data.end(), op_less);
                 }
-#else
-                std::sort(data.begin(), data.end(), op_less);
-#endif
 
                 size_t write = 0;
                 for (size_t read = 1; read < data.size(); ++read) {
@@ -262,61 +271,133 @@ class QubitHamiltonian{
                 }
                 data.resize(write + 1);
 
-                
                 data.erase(std::remove_if(data.begin(), data.end(),
-                        [](const PauliString<Coeff>& ps) {
-                                if constexpr (std::is_same_v<Coeff, std::complex<double>>) {
-                                        return ps.coeff == std::complex<double>(0.0, 0.0);
-                                } else {
-
-                                        try {
-                                                auto c = PauliString<Coeff>::to_complex(ps.coeff);
-                                                return c == std::complex<double>(0.0, 0.0);
-                                        } catch (...) {
-                                                return false;
-                                        }
-                                }
-                        }), data.end());
+                        [](const PauliString<Coeff>& ps) { return coeff_is_zero(ps.coeff); }),
+                        data.end());
 
                 return *this;
         }
 
     private:
-     
-        void parallel_sort_data(Cmp cmp) {
+        static bool coeff_is_zero(const Coeff& c) {
+                if constexpr (std::is_same_v<Coeff, std::complex<double>>) {
+                        return c == std::complex<double>(0.0, 0.0);
+                } else {
+                    const auto& basic = *c.get_basic();
+                        return SymEngine::is_a_Number(basic)
+                                && SymEngine::down_cast<const SymEngine::Number&>(basic).is_zero();
+                }
+        }
+
+        // Largest word count handled by the small-key fast path (8 words =
+        // 512 qubits). Beyond this, compact() falls back to the generic sort.
+        static constexpr size_t kMaxSmallKeyWords = 8;
+
+        // Compile-time dispatch: picks the smallest W in {1, 2, 4, ...,
+        // kMaxSmallKeyWords} that fits max_words and runs compact_small_key<W>.
+        // Returns false when max_words exceeds the fast-path limit.
+        template<size_t W = 1>
+        bool try_compact_small_key(size_t max_words) {
+                if constexpr (W > kMaxSmallKeyWords) {
+                        return false;
+                } else {
+                        if (max_words <= W) {
+                                compact_small_key<W>();
+                                return true;
+                        }
+                        return try_compact_small_key<W * 2>(max_words);
+                }
+        }
+
+        template<size_t W>
+        void compact_small_key() {
+                struct Entry {
+                        uint64_t key[2 * W];
+                        uint32_t idx;
+                };
+                const size_t n = data.size();
+                std::vector<Entry> entries(n);
+                for (size_t i = 0; i < n; ++i) {
+                        Entry& e = entries[i];
+                        const PauliString<Coeff>& ps = data[i];
+                        const size_t nw = ps.x.size();
+                        for (size_t k = 0; k < W; ++k) {
+                                e.key[k]     = (k < nw) ? ps.x[k] : 0;
+                                e.key[W + k] = (k < nw) ? ps.y[k] : 0;
+                        }
+                        e.idx = static_cast<uint32_t>(i);
+                }
+
+                auto key_less = [](const Entry& a, const Entry& b) {
+                        for (size_t k = 0; k < 2 * W; ++k) {
+                                if (a.key[k] != b.key[k]) return a.key[k] < b.key[k];
+                        }
+                        return false;
+                };
+                auto key_equal = [](const Entry& a, const Entry& b) {
+                        for (size_t k = 0; k < 2 * W; ++k) {
+                                if (a.key[k] != b.key[k]) return false;
+                        }
+                        return true;
+                };
+
+                parallel_sort_vec(entries, key_less);
+
+                std::vector<PauliString<Coeff>> out;
+                out.reserve(n);
+                size_t i = 0;
+                while (i < n) {
+                        Coeff acc = std::move(data[entries[i].idx].coeff);
+                        size_t j = i + 1;
+                        while (j < n && key_equal(entries[i], entries[j])) {
+                                acc = acc + data[entries[j].idx].coeff;
+                                ++j;
+                        }
+                        if (!coeff_is_zero(acc)) {
+                                PauliString<Coeff> ps = std::move(data[entries[i].idx]);
+                                ps.coeff = std::move(acc);
+                                out.push_back(std::move(ps));
+                        }
+                        i = j;
+                }
+                data = std::move(out);
+        }
+
+        // Chunked parallel merge sort; falls back to std::sort without OpenMP
+        // or for small inputs. Elements must be safe to move across threads.
+        template<typename T, typename Cmp>
+        static void parallel_sort_vec(std::vector<T>& v, Cmp cmp) {
 #ifdef PAULIENGINE_HAS_OPENMP
+                const size_t n = v.size();
                 const int nthreads = omp_get_max_threads();
-                if (nthreads <= 1) {
-                        std::sort(data.begin(), data.end(), cmp);
+                if (n >= PAULIENGINE_OMP_THRESHOLD && nthreads > 1) {
+                        const size_t chunk = (n + nthreads - 1) / nthreads;
+
+                        #pragma omp parallel for schedule(static)
+                        for (int t = 0; t < nthreads; ++t) {
+                                const size_t begin = static_cast<size_t>(t) * chunk;
+                                if (begin >= n) continue;
+                                const size_t end = std::min(begin + chunk, n);
+                                std::sort(v.begin() + begin, v.begin() + end, cmp);
+                        }
+
+                        for (int step = 1; step < nthreads; step *= 2) {
+                                #pragma omp parallel for schedule(dynamic)
+                                for (int t = 0; t < nthreads; t += 2 * step) {
+                                        const size_t begin = static_cast<size_t>(t) * chunk;
+                                        const size_t mid   = std::min(static_cast<size_t>(t + step) * chunk, n);
+                                        const size_t end   = std::min(static_cast<size_t>(t + 2 * step) * chunk, n);
+                                        if (mid >= end || begin >= mid) continue;
+                                        std::inplace_merge(v.begin() + begin,
+                                                           v.begin() + mid,
+                                                           v.begin() + end,
+                                                           cmp);
+                                }
+                        }
                         return;
                 }
-                const size_t n = data.size();
-                const size_t chunk = (n + nthreads - 1) / nthreads;
-
-                #pragma omp parallel for schedule(static)
-                for (int t = 0; t < nthreads; ++t) {
-                        const size_t begin = static_cast<size_t>(t) * chunk;
-                        if (begin >= n) continue;
-                        const size_t end = std::min(begin + chunk, n);
-                        std::sort(data.begin() + begin, data.begin() + end, cmp);
-                }
-
-                for (int step = 1; step < nthreads; step *= 2) {
-                        #pragma omp parallel for schedule(dynamic)
-                        for (int t = 0; t < nthreads; t += 2 * step) {
-                                const size_t begin = static_cast<size_t>(t) * chunk;
-                                const size_t mid   = std::min(static_cast<size_t>(t + step) * chunk, n);
-                                const size_t end   = std::min(static_cast<size_t>(t + 2 * step) * chunk, n);
-                                if (mid >= end || begin >= mid) continue;
-                                std::inplace_merge(data.begin() + begin,
-                                                   data.begin() + mid,
-                                                   data.begin() + end,
-                                                   cmp);
-                        }
-                }
-#else
-                std::sort(data.begin(), data.end(), cmp);
 #endif
+                std::sort(v.begin(), v.end(), cmp);
         }
     public:
 
@@ -354,86 +435,58 @@ class QubitHamiltonian{
         }
 
         QubitHamiltonian commutator(const QubitHamiltonian& other) const {
-
-                using Map = std::unordered_map<PauliString<Coeff>, Coeff,
-                        PauliStringHash<Coeff>, PauliStringOperatorEqual<Coeff>>;
-
-                const int n1 = static_cast<int>(this->data.size());
+                const int n1 = static_cast<int>(this->data.size()); 
                 const size_t n2 = other.data.size();
+                const size_t pairs = static_cast<size_t>(n1) * n2;
 
-                auto insert_into = [](Map& m, PauliString<Coeff>&& temp) {
-                        if constexpr (std::is_same_v<Coeff, std::complex<double>>) {
-                                if (temp.coeff == std::complex<double>(0.0, 0.0)) return;
-                        }
-                        Coeff c = temp.coeff;  
-                        auto [it, inserted] = m.try_emplace(std::move(temp), c);
-                        if (!inserted) {
-                                it->second = it->second + c;
-                        }
-                };
 
-                Map merged;
+                std::vector<PauliString<Coeff>> terms;
 
                 const bool parallel_ok =
 #ifdef PAULIENGINE_HAS_OPENMP
                         std::is_same_v<Coeff, std::complex<double>>
-                        && static_cast<size_t>(n1) * n2 >= PAULIENGINE_OMP_THRESHOLD;
+                        && pairs >= PAULIENGINE_OMP_THRESHOLD;
 #else
                         false;
 #endif
 
                 if (!parallel_ok) {
-                        merged.reserve(static_cast<size_t>(n1) * n2 / 8 + 1);
+                        terms.reserve(pairs / 8 + 1);
                         for (int i = 0; i < n1; ++i) {
                                 for (size_t j = 0; j < n2; ++j) {
-                                        insert_into(merged, this->data[i].commutator(other.data[j]));
+                                        PauliString<Coeff> t = this->data[i].commutator(other.data[j]);
+                                        if (!t.x.empty()) {
+                                                terms.push_back(std::move(t));
+                                        }
                                 }
                         }
                 } else {
 #ifdef PAULIENGINE_HAS_OPENMP
                         const int nthreads = omp_get_max_threads();
-                        std::vector<Map> local_maps(nthreads);
-                        const size_t reserve_hint = (static_cast<size_t>(n1) * n2) / (8 * nthreads) + 1;
-                        for (auto& m : local_maps) m.reserve(reserve_hint);
+                        std::vector<std::vector<PauliString<Coeff>>> local(nthreads);
+                        for (auto& v : local) v.reserve(pairs / (8 * nthreads) + 1);
 
                         #pragma omp parallel for schedule(static)
                         for (int i = 0; i < n1; ++i) {
-                                const int tid = omp_get_thread_num();
-                                Map& local = local_maps[tid];
+                                auto& mine = local[omp_get_thread_num()];
                                 for (size_t j = 0; j < n2; ++j) {
-                                        insert_into(local, this->data[i].commutator(other.data[j]));
+                                        PauliString<Coeff> t = this->data[i].commutator(other.data[j]);
+                                        if (!t.x.empty()) {
+                                                mine.push_back(std::move(t));
+                                        }
                                 }
                         }
 
-                        // Sequential merge of local maps; use the largest as base.
-                        size_t largest = 0;
-                        for (size_t t = 1; t < local_maps.size(); ++t) {
-                                if (local_maps[t].size() > local_maps[largest].size()) largest = t;
-                        }
-                        merged = std::move(local_maps[largest]);
-                        for (size_t t = 0; t < local_maps.size(); ++t) {
-                                if (t == largest) continue;
-                                for (auto& kv : local_maps[t]) {
-                                        auto [it, inserted] = merged.try_emplace(kv.first, kv.second);
-                                        if (!inserted) {
-                                                it->second = it->second + kv.second;
-                                        }
-                                }
-                                local_maps[t].clear();
+                        size_t total = 0;
+                        for (const auto& v : local) total += v.size();
+                        terms.reserve(total);
+                        for (auto& v : local) {
+                                for (auto& t : v) terms.push_back(std::move(t));
+                                v.clear();
                         }
 #endif
                 }
-
-                std::vector<PauliString<Coeff>> result;
-                result.reserve(merged.size());
-                while (!merged.empty()) {
-                        auto node = merged.extract(merged.begin());
-                        if (node.mapped() != Coeff(0.0)) {
-                                node.key().coeff = node.mapped();
-                                result.push_back(std::move(node.key()));
-                        }
-                }
-                return QubitHamiltonian(std::move(result), already_compacted);
+                return QubitHamiltonian(std::move(terms));  // constructor calls compact()
         }
 
         size_t size() const { return data.size(); }

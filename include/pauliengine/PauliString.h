@@ -22,6 +22,116 @@ const std::complex<double> I(0.0 , 1.0);
 inline int popcount(uint64_t x);
 void testSymengine();
 
+// Small-buffer word storage for the symplectic bit representation: up to
+// kInlineWords 64-bit words (= 128 qubits) live inline without touching the
+// heap; longer strings fall back to a single heap allocation. Pauli string
+// multiplication creates one short-lived string per pair, so avoiding
+// malloc/free on that path matters.
+class WordVec {
+    public:
+        static constexpr size_t kInlineWords = 2;
+
+        WordVec() noexcept : size_(0), cap_(kInlineWords), ptr_(buf_) {}
+
+        explicit WordVec(size_t n) : WordVec() { resize(n); }
+
+        WordVec(const WordVec& o) : WordVec() { assign(o.ptr_, o.ptr_ + o.size_); }
+
+        WordVec(WordVec&& o) noexcept : size_(o.size_), cap_(kInlineWords), ptr_(buf_) {
+                if (o.ptr_ != o.buf_) {
+                        ptr_ = o.ptr_;
+                        cap_ = o.cap_;
+                } else {
+                        for (size_t i = 0; i < size_; ++i) buf_[i] = o.buf_[i];
+                }
+                o.ptr_ = o.buf_;
+                o.size_ = 0;
+                o.cap_ = kInlineWords;
+        }
+
+        WordVec(const std::vector<uint64_t>& v) : WordVec() { assign(v.data(), v.data() + v.size()); }
+
+        WordVec& operator=(const WordVec& o) {
+                if (this != &o) assign(o.ptr_, o.ptr_ + o.size_);
+                return *this;
+        }
+
+        WordVec& operator=(WordVec&& o) noexcept {
+                if (this == &o) return *this;
+                if (ptr_ != buf_) delete[] ptr_;
+                if (o.ptr_ != o.buf_) {
+                        ptr_ = o.ptr_;
+                        cap_ = o.cap_;
+                } else {
+                        ptr_ = buf_;
+                        cap_ = kInlineWords;
+                        for (size_t i = 0; i < o.size_; ++i) buf_[i] = o.buf_[i];
+                }
+                size_ = o.size_;
+                o.ptr_ = o.buf_;
+                o.size_ = 0;
+                o.cap_ = kInlineWords;
+                return *this;
+        }
+
+        ~WordVec() {
+                if (ptr_ != buf_) delete[] ptr_;
+        }
+
+        size_t size() const noexcept { return size_; }
+        bool empty() const noexcept { return size_ == 0; }
+        uint64_t* data() noexcept { return ptr_; }
+        const uint64_t* data() const noexcept { return ptr_; }
+        uint64_t& operator[](size_t i) noexcept { return ptr_[i]; }
+        const uint64_t& operator[](size_t i) const noexcept { return ptr_[i]; }
+        uint64_t* begin() noexcept { return ptr_; }
+        uint64_t* end() noexcept { return ptr_ + size_; }
+        const uint64_t* begin() const noexcept { return ptr_; }
+        const uint64_t* end() const noexcept { return ptr_ + size_; }
+
+        // Grows zero-filled; shrinking never reallocates.
+        void resize(size_t n) {
+                if (n > cap_) {
+                        uint64_t* p = new uint64_t[n];
+                        for (size_t i = 0; i < size_; ++i) p[i] = ptr_[i];
+                        if (ptr_ != buf_) delete[] ptr_;
+                        ptr_ = p;
+                        cap_ = n;
+                }
+                for (size_t i = size_; i < n; ++i) ptr_[i] = 0;
+                size_ = n;
+        }
+
+        void assign(const uint64_t* first, const uint64_t* last) {
+                const size_t n = static_cast<size_t>(last - first);
+                if (n > cap_) {
+                        uint64_t* p = new uint64_t[n];
+                        if (ptr_ != buf_) delete[] ptr_;
+                        ptr_ = p;
+                        cap_ = n;
+                }
+                for (size_t i = 0; i < n; ++i) ptr_[i] = first[i];
+                size_ = n;
+        }
+
+        std::vector<uint64_t> to_vector() const { return std::vector<uint64_t>(ptr_, ptr_ + size_); }
+
+        friend bool operator==(const WordVec& a, const WordVec& b) {
+                if (a.size_ != b.size_) return false;
+                for (size_t i = 0; i < a.size_; ++i) {
+                        if (a.ptr_[i] != b.ptr_[i]) return false;
+                }
+                return true;
+        }
+        friend bool operator!=(const WordVec& a, const WordVec& b) { return !(a == b); }
+
+    private:
+        size_t size_;
+        size_t cap_;
+        uint64_t* ptr_;
+        uint64_t buf_[kInlineWords];
+};
+
 
 template<typename Coeff>
 class PauliString {
@@ -29,8 +139,8 @@ class PauliString {
                 using Pauli_structure = std::pair<Coeff, std::unordered_map<int, std::string>>;
                 using Hamiltonian_structure = std::vector<Pauli_structure>;
 
-                std::vector<uint64_t> x;
-                std::vector<uint64_t> y;
+                WordVec x;
+                WordVec y;
                 Coeff coeff{0.0};
                 uint64_t is_zero{true};
                 PauliString() = default;
@@ -40,13 +150,22 @@ class PauliString {
                         while (n > 0 && x[n - 1] == 0 && y[n - 1] == 0) {
                                 --n;
                         }
-                        this->x.assign(x.begin(), x.begin() + n);
-                        this->y.assign(y.begin(), y.begin() + n);
+                        this->x.assign(x.data(), x.data() + n);
+                        this->y.assign(y.data(), y.data() + n);
                         this->coeff = coeff;
                 }
 
+                PauliString(const WordVec& x, const WordVec& y, Coeff coeff) {
+                        size_t n = std::min(x.size(), y.size());
+                        while (n > 0 && x[n - 1] == 0 && y[n - 1] == 0) {
+                                --n;
+                        }
+                        this->x.assign(x.data(), x.data() + n);
+                        this->y.assign(y.data(), y.data() + n);
+                        this->coeff = coeff;
+                }
 
-                PauliString(std::vector<uint64_t>&& x_in, std::vector<uint64_t>&& y_in, Coeff coeff) {
+                PauliString(WordVec&& x_in, WordVec&& y_in, Coeff coeff) {
                         size_t n = std::min(x_in.size(), y_in.size());
                         while (n > 0 && x_in[n - 1] == 0 && y_in[n - 1] == 0) {
                                 --n;
@@ -64,6 +183,7 @@ class PauliString {
                         for (const auto& [key, value] : data) {
                                 get_symplectic_form(key, mask, value);
                         }
+                        trim_trailing_zero_words();
                 }
 
                 PauliString(const std::pair<Coeff, std::vector<std::pair<char, int>>>& input) {
@@ -74,6 +194,7 @@ class PauliString {
                                 get_symplectic_form(paulis[i].second, mask, std::string(1, paulis[i].first));
 
                         }
+                        trim_trailing_zero_words();
                 }
 
                 /**
@@ -88,6 +209,7 @@ class PauliString {
                         for (size_t i = 0; i < pauli_string.size(); i++) {
                                 get_symplectic_form(i, mask, std::string(1, pauli_string[i]));
                         }
+                        trim_trailing_zero_words();
                 }
 
 
@@ -105,6 +227,8 @@ class PauliString {
 
                 PauliString operator*(const PauliString& other) const {
                         // Source: https://arxiv.org/pdf/2103.02202 figure 12
+                        const uint64_t *x1 = x.data();
+                        const uint64_t *y1 = y.data();
                         const uint64_t *x2 = other.x.data();
                         const uint64_t *y2 = other.y.data();
                         const size_t n1 = x.size();
@@ -112,33 +236,33 @@ class PauliString {
                         const size_t n_min = n1 < n2 ? n1 : n2;
                         const size_t n_max = n1 < n2 ? n2 : n1;
 
-                        // Pre-size to the final length so no reallocation happens in the
-                        // tail-append below.
-                        std::vector<uint64_t> new_x(n_max);
-                        std::vector<uint64_t> new_y(n_max);
-                        std::copy(x.begin(), x.end(), new_x.begin());
-                        std::copy(y.begin(), y.end(), new_y.begin());
-                        if (n1 < n2) {
-                                std::copy(x2 + n1, x2 + n2, new_x.begin() + n1);
-                                std::copy(y2 + n1, y2 + n2, new_y.begin() + n1);
-                        }
+                        WordVec new_x(n_max);
+                        WordVec new_y(n_max);
 
                         // The 1s and 2s bits of 64 mod4 counters.
                         uint64_t c1 = 0;
                         uint64_t c2 = 0;
-                        // Iterate over data in 64 bit chunks.
+                        // Single pass over the overlapping 64 bit chunks: compute the
+                        // product words and accumulate anti-commutation counts.
                         for (size_t k = 0; k < n_min; k++) {
-                            uint64_t old_x1 = new_x[k];
-                            uint64_t old_y1 = new_y[k];
-                            // Update the left hand side Paulis.
-                            new_x[k] ^= x2[k];
-                            new_y[k] ^= y2[k];
-                            // Accumulate anti-commutation counts.
-                            uint64_t x1y2 = old_x1 & y2[k];
-                            uint64_t anti_commutes = (x2[k] & old_y1) ^ x1y2;
-                            c2 ^= (c1 ^ new_x[k] ^ new_y[k] ^ x1y2) & anti_commutes;
+                            const uint64_t xa = x1[k];
+                            const uint64_t ya = y1[k];
+                            const uint64_t xb = x2[k];
+                            const uint64_t yb = y2[k];
+                            const uint64_t nx = xa ^ xb;
+                            const uint64_t ny = ya ^ yb;
+                            new_x[k] = nx;
+                            new_y[k] = ny;
+                            const uint64_t x1y2 = xa & yb;
+                            const uint64_t anti_commutes = (xb & ya) ^ x1y2;
+                            c2 ^= (c1 ^ nx ^ ny ^ x1y2) & anti_commutes;
                             c1 ^= anti_commutes;
                         }
+                        // Tail beyond the shorter operand comes straight from the longer one.
+                        const uint64_t *tail_x = (n1 < n2) ? x2 : x1;
+                        const uint64_t *tail_y = (n1 < n2) ? y2 : y1;
+                        std::copy(tail_x + n_min, tail_x + n_max, new_x.begin() + n_min);
+                        std::copy(tail_y + n_min, tail_y + n_max, new_y.begin() + n_min);
 
                         // Update coefficient accounting for factors of i gained from Pauli multiplications.
                         auto new_coeff = this->coeff * other.coeff;
@@ -334,8 +458,8 @@ class PauliString {
                                 throw std::runtime_error("trace_out_qubits: qubits and state must have the same length");
                         }
 
-                        std::vector<uint64_t> new_x = this->x;
-                        std::vector<uint64_t> new_y = this->y;
+                        WordVec new_x = this->x;
+                        WordVec new_y = this->y;
                         double sign = 1.0;
 
                         for (size_t i = 0; i < qubits.size(); i++) {
@@ -376,8 +500,8 @@ class PauliString {
                                 throw std::runtime_error("trace_out_qubits: qubits and states must have the same length");
                         }
 
-                        std::vector<uint64_t> new_x = this->x;
-                        std::vector<uint64_t> new_y = this->y;
+                        WordVec new_x = this->x;
+                        WordVec new_y = this->y;
                         std::complex<double> factor(1.0, 0.0);
                         const std::complex<double> I_unit(0.0, 1.0);
 
@@ -548,11 +672,22 @@ class PauliString {
                         return symbols;
                 }
 
+                // Keep the representation canonical: equal operators must have
+                // equal word counts (compact() and operator== rely on it).
+                void trim_trailing_zero_words() {
+                        size_t n = x.size();
+                        while (n > 0 && x[n - 1] == 0 && y[n - 1] == 0) {
+                                --n;
+                        }
+                        x.resize(n);
+                        y.resize(n);
+                }
+
                 void get_symplectic_form(size_t pauli_index, uint64_t& mask, const std::string& pauli_char) {
                         size_t index = pauli_index / BITS_IN_INTEGER;
                         if (x.size() <= index) {
-                                x.resize(index + 1, 0);
-                                y.resize(index + 1, 0);
+                                x.resize(index + 1);
+                                y.resize(index + 1);
                         }
                         mask = ((uint64_t) 1 <<  pauli_index % BITS_IN_INTEGER);
 
