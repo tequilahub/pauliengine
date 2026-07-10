@@ -38,9 +38,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dynamic = ["version"]
-dependencies = [
-  "numpy",
-]
+dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/tequilahub/pauliengine"

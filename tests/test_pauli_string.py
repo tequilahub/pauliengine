@@ -1,4 +1,5 @@
-import numpy as np
+import math
+
 import pytest
 
 import pauliengine as pe
@@ -585,28 +586,28 @@ class TestPauliStringTraceOutPurity:
 # <psi|P|psi> = |a|^2 <0|P|0> + a*b <0|P|1> + ab* <1|P|0> + |b|^2 <1|P|1>
  
 
+# Flattened (row-major) 2x2 Pauli matrices.
 _PAULI_MATRICES = {
-    "I": np.array([[1, 0], [0, 1]], dtype=complex),
-    "X": np.array([[0, 1], [1, 0]], dtype=complex),
-    "Y": np.array([[0, -1j], [1j, 0]], dtype=complex),
-    "Z": np.array([[1, 0], [0, -1]], dtype=complex),
+    "I": (1 + 0j, 0j, 0j, 1 + 0j),
+    "X": (0j, 1 + 0j, 1 + 0j, 0j),
+    "Y": (0j, -1j, 1j, 0j),
+    "Z": (1 + 0j, 0j, 0j, -1 + 0j),
 }
 
 
 def _tequila_expectation(op: str, a: complex, b: complex) -> complex:
     """Faithful reproduction of tequila's <psi|op|psi> via the flattened
     matrix · density-vector formula."""
-    vec = np.array([
-        np.abs(a) ** 2,
-        np.conjugate(a) * b,
-        np.conjugate(b) * a,
-        np.abs(b) ** 2,
-    ])
-    m = _PAULI_MATRICES[op].reshape(4)
-    return complex(vec.dot(m))
+    vec = (
+        abs(a) ** 2,
+        a.conjugate() * b,
+        b.conjugate() * a,
+        abs(b) ** 2,
+    )
+    return complex(sum(v * m for v, m in zip(vec, _PAULI_MATRICES[op], strict=True)))
 
 
-_INV_SQRT2 = 1 / np.sqrt(2)
+_INV_SQRT2 = 1 / math.sqrt(2)
 
 
 class TestPauliStringTraceGeneralStates:

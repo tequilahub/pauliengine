@@ -1,4 +1,5 @@
-import numpy as np
+import math
+
 import pytest
 
 import pauliengine as pe
@@ -832,36 +833,56 @@ class TestPower:
  
 
 _PAULI_MATS = {
-    "X": np.array([[0, 1], [1, 0]], dtype=complex),
-    "Y": np.array([[0, -1j], [1j, 0]], dtype=complex),
-    "Z": np.array([[1, 0], [0, -1]], dtype=complex),
+    "X": [[0j, 1 + 0j], [1 + 0j, 0j]],
+    "Y": [[0j, -1j], [1j, 0j]],
+    "Z": [[1 + 0j, 0j], [0j, -1 + 0j]],
 }
+
+
+def _allclose(m1, m2, tol=1e-12):
+    return all(
+        abs(complex(x) - complex(y)) <= tol
+        for row1, row2 in zip(m1, m2, strict=True)
+        for x, y in zip(row1, row2, strict=True)
+    )
+
+
+def _kron(m1, m2):
+    return [
+        [x * y for x in row1 for y in row2]
+        for row1 in m1
+        for row2 in m2
+    ]
+
+
+def _shape(m):
+    return (len(m), len(m[0]))
 
 
 class TestToMatrix:
     @pytest.mark.parametrize("op", ["X", "Y", "Z"])
     def test_single_pauli(self, op):
-        m = np.array(_complex_qh((1.0, {0: op})).to_matrix())
-        assert np.allclose(m, _PAULI_MATS[op])
+        m = _complex_qh((1.0, {0: op})).to_matrix()
+        assert _allclose(m, _PAULI_MATS[op])
 
     def test_sum_and_scaling(self):
         """X + Z gives [[1,1],[1,-1]] and 2.5*X scales the X matrix by 2.5."""
-        m_sum = np.array(_complex_qh((1.0, {0: "X"}), (1.0, {0: "Z"})).to_matrix())
-        assert np.allclose(m_sum, np.array([[1, 1], [1, -1]], dtype=complex))
-        m_scaled = np.array(_complex_qh((2.5, {0: "X"})).to_matrix())
-        assert np.allclose(m_scaled, 2.5 * _PAULI_MATS["X"])
+        m_sum = _complex_qh((1.0, {0: "X"}), (1.0, {0: "Z"})).to_matrix()
+        assert _allclose(m_sum, [[1, 1], [1, -1]])
+        m_scaled = _complex_qh((2.5, {0: "X"})).to_matrix()
+        assert _allclose(m_scaled, [[2.5 * x for x in row] for row in _PAULI_MATS["X"]])
 
     def test_two_qubit_zz(self):
-        m = np.array(_complex_qh((1.0, {0: "Z", 1: "Z"})).to_matrix())
-        assert m.shape == (4, 4)
-        assert np.allclose(m, np.kron(_PAULI_MATS["Z"], _PAULI_MATS["Z"]))
+        m = _complex_qh((1.0, {0: "Z", 1: "Z"})).to_matrix()
+        assert _shape(m) == (4, 4)
+        assert _allclose(m, _kron(_PAULI_MATS["Z"], _PAULI_MATS["Z"]))
 
     def test_ignore_unused_qubits(self):
         """ignore=True compresses; ignore=False uses absolute qubit indices."""
         qh_high = _complex_qh((1.0, {5: "X"}))
-        assert np.array(qh_high.to_matrix(ignore_unused_qubits=True)).shape == (2, 2)
+        assert _shape(qh_high.to_matrix(ignore_unused_qubits=True)) == (2, 2)
         qh_mid = _complex_qh((1.0, {2: "X"}))
-        assert np.array(qh_mid.to_matrix(ignore_unused_qubits=False)).shape == (8, 8)
+        assert _shape(qh_mid.to_matrix(ignore_unused_qubits=False)) == (8, 8)
 
 
  
@@ -1022,7 +1043,7 @@ class TestTraceGeneralStates:
     def test_qh_general_state_two_terms(self):
         """X(0) + Z(0) traced against |+> -> <X> + <Z> = 1 + 0 = identity term."""
         qh = _complex_qh((1.0, {0: "X"}), (1.0, {0: "Z"}))
-        plus = (1 / np.sqrt(2), 1 / np.sqrt(2))
+        plus = (1 / math.sqrt(2), 1 / math.sqrt(2))
         result = qh.trace_out_qubits([0], [plus])
         assert result.size() == 1
         coeff, ops = result.to_dictionary()[0]
