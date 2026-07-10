@@ -42,7 +42,7 @@ jobs:
       - name: Build SDist
         run: |
           pipx install uv
-          pipx run build --verbose --sdist --installer=uv
+          uv build --sdist --verbose
 
       - uses: actions/upload-artifact@v6
         with:
