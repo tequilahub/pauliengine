@@ -6,7 +6,7 @@ build-backend = "scikit_build_core.build"
 name = "pauliengine"
 description = "Fast arithmetics for quantum operators (Pauli strings & Hamiltonians)."
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.10,<3.14"
 license = { file = "LICENSE" }
 authors = [
   { name = "Leon Müller", email = "leon.mueller@student.uni-augsburg.de" },
@@ -80,8 +80,8 @@ url = "https://pypi.org/simple"
 minimum-version = "build-system.requires"
 # setuptools-style build caching in a local directory
 build-dir = "build"
-# build stable ABI wheels for CPython 3.12+
-wheel.py-api = "cp312"
+# build stable ABI wheels for CPython 3.12+ (gated below; the nanobind stable
+# ABI requires CPython >= 3.12, so on 3.10/3.11 we build version-specific wheels)
 metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
 logging.level = "INFO"
 # read CMake version from CMakeLists.txt
@@ -121,6 +121,12 @@ build.tool-args = ["-j8"]
 [[tool.scikit-build.overrides]]
 if.platform-system = "windows"
 build.tool-args = ["/m:8"]
+
+# Stable ABI (abi3) wheels only on CPython >= 3.12 (nanobind requirement).
+# On 3.10/3.11 this leaves py-api unset, producing a version-specific wheel.
+[[tool.scikit-build.overrides]]
+if.python-version = ">=3.12"
+wheel.py-api = "cp312"
 
 
 [tool.setuptools_scm]
