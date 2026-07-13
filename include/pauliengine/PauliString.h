@@ -220,8 +220,9 @@ class PauliString {
                         if constexpr (std::is_same<Coeff, std::complex<double>>::value) {
                                 return this->coeff == other.coeff;
                         } else {
-                                return (this->coeff - other.coeff) == 0;
-
+                                const Expression difference = expand(this->coeff - other.coeff);
+                                const auto& basic = *difference.get_basic();
+                                return is_a_Number(basic) && down_cast<const Number&>(basic).is_zero();
                         }
                 }
 
@@ -598,19 +599,8 @@ class PauliString {
                 }
 
                 PauliString diff(const std::string& symbol_name) const{
-                        set_basic symbols = get_free_symbols(this->coeff);
-                        Coeff coeff_diff;
-                        for(const auto& s : symbols) {
-                                if (is_a<Symbol>(*s)) {
-                                        const Symbol& sym = down_cast<const Symbol&>(*s);
-                                        if (sym.get_name() == symbol_name) {
-                                                coeff_diff = this->coeff.diff(symbol(symbol_name));
-                                                return PauliString(this->x, this->y, coeff_diff);
-                                        }
-                                }
-                        }
-                        return PauliString();
-
+                        Coeff coeff_diff = this->coeff.diff(symbol(symbol_name));
+                        return PauliString(this->x, this->y, coeff_diff);
                 }
 
                 PauliString substitute(const std::unordered_map<std::string, std::complex<double>>& substitution_map) const {
@@ -661,17 +651,6 @@ class PauliString {
                 }
 
         private:
-                static set_basic get_free_symbols(const Expression& expr) {
-                        vec_basic args = expr.get_basic()->get_args();
-                        set_basic symbols;
-                        for (const auto& a : args) {
-                                if (is_a<Symbol>(*a)) {
-                                        symbols.insert(a);
-                                }
-                        }
-                        return symbols;
-                }
-
                 // Keep the representation canonical: equal operators must have
                 // equal word counts (compact() and operator== rely on it).
                 void trim_trailing_zero_words() {

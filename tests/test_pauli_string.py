@@ -653,3 +653,20 @@ class TestPauliStringTraceGeneralStates:
         ps = pe.PauliString(1.0, {0: "Z"})
         traced = ps.trace_out_qubits([0], [(2.0 + 0j, 0.0 + 0j)])
         assert complex(traced.coeff) == pytest.approx(4.0 + 0j)
+
+class TestPauliStringSubs:
+    def test_subs_replaces_symbol(self):
+        ps = pe.PauliString("a", {0: "X"})
+        result = ps.subs({"a": 2.0 + 0j})
+        assert _core.PauliStringSymbolic.to_complex(result.get_coeff()) == pytest.approx(2.0 + 0j)
+
+    def test_subs_partial_stays_symbolic(self):
+        ps = pe.PauliString("a*b", {0: "X"})
+        result = ps.subs({"a": 2.0 + 0j})
+        with pytest.raises(RuntimeError):
+            _core.PauliStringSymbolic.to_complex(result.get_coeff())
+
+    def test_subs_then_diff_chain(self):
+        ps = pe.PauliString("b*a**2", {1: "Z"})
+        d = ps.diff("a").subs({"a": 3.0 + 0j, "b": 2.0 + 0j})
+        assert _core.PauliStringSymbolic.to_complex(d.get_coeff()) == pytest.approx(12.0 + 0j)

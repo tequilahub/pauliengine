@@ -184,7 +184,16 @@ class QubitHamiltonian{
                 for (const auto& ps : other.data) {
                         second_data[ps] = second_data[ps] + ps.coeff;
                 }
-                return first_data == second_data;
+                if (first_data.size() != second_data.size()) {
+                        return false;
+                }
+                for (const auto& [ps, coeff] : first_data) {
+                        auto it = second_data.find(ps);
+                        if (it == second_data.end() || !coeff_equal(coeff, it->second)) {
+                                return false;
+                        }
+                }
+                return true;
         }
 
         QubitHamiltonian set_all_coeff(std::complex<double> value) const {
@@ -206,7 +215,7 @@ class QubitHamiltonian{
                 std::vector<PauliString<Coeff>> data;
                 for (const PauliString<Coeff>& ps : this->data) {
                         PauliString<Coeff> temp = ps.diff(symbol);
-                        if (temp.is_zero == false) {
+                        if (!coeff_is_zero(temp.coeff)) {
                                 data.push_back(temp);
                         }
                 }
@@ -286,6 +295,14 @@ class QubitHamiltonian{
                     const auto& basic = *c.get_basic();
                         return SymEngine::is_a_Number(basic)
                                 && SymEngine::down_cast<const SymEngine::Number&>(basic).is_zero();
+                }
+        }
+
+        static bool coeff_equal(const Coeff& a, const Coeff& b) {
+                if constexpr (std::is_same_v<Coeff, std::complex<double>>) {
+                        return a == b;
+                } else {
+                        return coeff_is_zero(SymEngine::expand(a - b));
                 }
         }
 

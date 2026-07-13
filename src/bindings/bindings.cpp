@@ -164,6 +164,7 @@ NB_MODULE(_core, m) {
                         return QubitHamiltonian<SymEngine::Expression>({ps1, ps2_sym * -1});
                 }, "Subtract PauliStringSymbolic and PauliStringComplex to get QubitHamiltonianSymbolic")
                 .def("diff", &PauliString<SymEngine::Expression>::diff, "Symbolic derivative wrt the named symbol.")
+                .def("subs", &PauliString<SymEngine::Expression>::substitute, "Replace Variable with value")
                 .def("qubits", &PauliString<SymEngine::Expression>::qubits, "Returns list of qubits")
                 .def("equals", &PauliString<SymEngine::Expression>::equals, "Checks if 2 PauliStrings have same data")
                 .def("set_coeff", &PauliString<SymEngine::Expression>::set_coeff, "Sets coefficient using a SymEngine expression")

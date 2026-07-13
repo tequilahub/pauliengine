@@ -1049,3 +1049,53 @@ class TestTraceGeneralStates:
         coeff, ops = result.to_dictionary()[0]
         assert coeff == pytest.approx(1.0 + 0j)
         assert ops == {}
+
+
+class TestDiff:
+    def test_diff_bare_symbol(self):
+        qh = _symbolic_qh(("a", {0: "X"}))
+        result = qh.diff("a")
+        assert result.size() == 1
+        coeff, ops = result.to_dictionary()[0]
+        assert _core.PauliStringSymbolic.to_complex(coeff) == pytest.approx(1.0 + 0j)
+        assert ops == {0: "X"}
+
+    def test_diff_nested_expression(self):
+        qh = _symbolic_qh(("2*a + b", {0: "X"}))
+        result = qh.diff("a")
+        coeff, _ = result.to_dictionary()[0]
+        assert _core.PauliStringSymbolic.to_complex(coeff) == pytest.approx(2.0 + 0j)
+
+    def test_diff_product_rule(self):
+        qh = _symbolic_qh(("a**2*b", {0: "X"}))
+        result = qh.diff("a")
+        assert result == _symbolic_qh(("2*a*b", {0: "X"}))
+
+    def test_diff_unknown_symbol_is_empty(self):
+        qh = _symbolic_qh(("a", {0: "X"}))
+        assert qh.diff("c").size() == 0
+
+    def test_diff_drops_constant_terms(self):
+        qh = pe.QubitHamiltonian([("a", {0: "X"}), (0.5, {1: "Z"})])
+        result = qh.diff("a")
+        assert result.size() == 1
+
+    def test_diff_pauli_string(self):
+        ps = pe.PauliString("2*a + b", {0: "X"})
+        d = ps.diff("a")
+        assert _core.PauliStringSymbolic.to_complex(d.coeff) == pytest.approx(2.0 + 0j)
+
+
+class TestSymbolicEquality:
+    def test_compound_coefficient_self_equality(self):
+        qh = pe.QubitHamiltonian([("a", {0: "X"}), (0.5, {0: "X"})])
+        assert qh == qh
+
+    def test_float_sum_coefficient_equality(self):
+        assert _symbolic_qh(("0.5 + a", {0: "X"})) == _symbolic_qh(("0.5 + a", {0: "X"}))
+
+    def test_mathematically_equal_forms(self):
+        assert _symbolic_qh(("a*(1+b)", {0: "X"})) == _symbolic_qh(("a + a*b", {0: "X"}))
+
+    def test_different_symbols_unequal(self):
+        assert _symbolic_qh(("a", {0: "X"})) != _symbolic_qh(("b", {0: "X"}))
