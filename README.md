@@ -8,7 +8,7 @@ See [arXiv:2601.02233](https://arxiv.org/abs/2601.02233) for the algorithmic
 background.
 
 > **Status.** Functional core with a large test suite. The Python
-> API surface is stable. PyPI wheels and Sphinx docs are not published yet.
+> API surface is stable. Sphinx docs are not published yet.
 
 ---
 
@@ -209,11 +209,21 @@ operation exposed in Python is available in C++ with the same name.
 
 ## Installation
 
+### From PyPI
+
+```bash
+pip install pauliengine
+```
+
+Prebuilt wheels are available for Linux (x86_64/aarch64), macOS (arm64) and
+Windows (x86_64/arm64) on Python 3.10–3.13. Installing from the source
+distribution requires the build dependencies below.
+
 ### Build dependencies
 
 - A C++20 compiler (MSVC 19.3+, GCC 11+, or Clang 14+)
 - CMake 3.20+
-- Python 3.11–3.13
+- Python 3.10–3.13
 - [Conan 2](https://conan.io) (to pull in SymEngine)
 - [nanobind](https://github.com/wjakob/nanobind) (build-time)
 

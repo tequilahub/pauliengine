@@ -10,6 +10,7 @@ requires-python = ">=3.10,<3.14"
 license = { file = "LICENSE" }
 authors = [
   { name = "Leon Müller", email = "mueller.leon.home@gmail.com" },
+  { name = "Jakob Kottmann", email = "jakob.kottmann@gmail.com"}
 ]
 keywords = [
   "quantum",
