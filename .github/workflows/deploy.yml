@@ -39,6 +39,13 @@ jobs:
         with:
           fetch-depth: 0  # such that setuptools_scm can do its job correctly
 
+      # On release builds, pin the version to the tag so a dirty working tree
+      # (e.g. files touched by conan install) cannot shift it to a devN version.
+      - name: Pin version from release tag
+        if: github.event_name == 'release'
+        shell: bash
+        run: echo "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_PAULIENGINE=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
       - name: Build SDist
         run: |
           pipx install uv
@@ -76,6 +83,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      # On release builds, pin the version to the tag so a dirty working tree
+      # (e.g. files touched by conan install) cannot shift it to a devN version.
+      - name: Pin version from release tag
+        if: github.event_name == 'release'
+        shell: bash
+        run: echo "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_PAULIENGINE=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
       - uses: pypa/cibuildwheel@v3.3.1
         with:
           extras: "uv"
@@ -89,6 +103,8 @@ jobs:
           # increase pip debugging output
           CIBW_BUILD_VERBOSITY: 1
           CIBW_DEBUG_TRACEBACK: TRUE
+          # forward the pinned release version into the Linux build containers
+          CIBW_ENVIRONMENT_PASS_LINUX: SETUPTOOLS_SCM_PRETEND_VERSION_FOR_PAULIENGINE
           CIBW_BEFORE_ALL_LINUX: |
             dnf install -y ninja-build
             # install conan and C++ dependencies for the project
