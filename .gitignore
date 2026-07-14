@@ -21,3 +21,4 @@ src/pauliengine/_version.py
 # cause spurious noise across machines.
 tools/benchmarks/results/*
 !tools/benchmarks/results/.gitkeep
+CMakeUserPresets.json
