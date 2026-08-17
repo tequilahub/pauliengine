@@ -7,6 +7,8 @@
 #include <nanobind/stl/pair.h>
 
 #include "pauliengine/QubitHamiltonian.h"
+#include "pauliengine/PauliCycle.h"
+#include "pauliengine/PauliCycleSum.h"
 #include "pauliengine/Info.h"
 
 #ifdef PAULIENGINE_HAS_OPENMP
@@ -295,4 +297,43 @@ NB_MODULE(_core, m) {
                 .def("__repr__", [](const SymEngine::Expression &e) {
                         return SymEngine::str(*e.get_basic());
                 });
+
+        // PauliCycle (complex coefficients only)
+        nb::class_<PauliCycle>(m, "PauliCycleComplex",
+                "A Pauli string together with all of its cyclic rotations on n_qubits qubits.")
+                .def(nb::init<int, const std::unordered_map<int, std::string>&, std::complex<double>>(),
+                        nb::arg("n_qubits"), nb::arg("data"), nb::arg("coeff") = std::complex<double>(1.0, 0.0),
+                        "Construct from a qubit count, a map of qubit indices to Pauli operators, and a coefficient.")
+                .def(nb::init<int, const std::string&, std::complex<double>>(),
+                        nb::arg("n_qubits"), nb::arg("pauli_string"), nb::arg("coeff") = std::complex<double>(1.0, 0.0),
+                        "Construct from a qubit count, a string like \"XIY\", and a coefficient.")
+                .def(nb::init<int, const PauliString<std::complex<double>>&>(),
+                        nb::arg("n_qubits"), nb::arg("base"),
+                        "Construct from a qubit count and a base PauliString (coefficient taken from the string).")
+                .def("rotate", &PauliCycle::rotate, nb::arg("k"),
+                        "Cyclically rotate the base Pauli string by k positions (k may be negative or >= n_qubits).")
+                .def("rotations", &PauliCycle::rotations,
+                        "Return all n_qubits cyclic rotations as a list of PauliStrings.")
+                .def("to_qubit_hamiltonian", &PauliCycle::to_qubit_hamiltonian,
+                        "Return the sum of all rotations as a QubitHamiltonian.")
+                .def("commutator", &PauliCycle::commutator, nb::arg("other"),
+                        "Commutator with another PauliCycle (Eq. 40, bounded-weight O(n)), as a PauliCycleSum.")
+                .def_rw("n_qubits", &PauliCycle::n_qubits, "Number of qubits.")
+                .def_ro("base", &PauliCycle::Base, "The base Pauli string.")
+                .def("__repr__", [](const PauliCycle& pc) {
+                        return "PauliCycleComplex(n_qubits=" + std::to_string(pc.n_qubits)
+                                + ", base=" + pc.Base.to_string() + ")";
+                });
+
+        // PauliCycleSum (complex coefficients only)
+        nb::class_<PauliCycleSum>(m, "PauliCycleSumComplex",
+                "A scalar-weighted sum of PauliCycles.")
+                .def("__init__", [](PauliCycleSum* self, double coeff, std::vector<PauliCycle> data) {
+                        new (self) PauliCycleSum(coeff, data);
+                }, nb::arg("coeff"), nb::arg("data"),
+                "Construct from a scalar coefficient and a list of PauliCycles.")
+                .def("to_qubit_hamiltonian", &PauliCycleSum::to_qubit_hamiltonian,
+                        "Return the weighted sum of all cycles as a QubitHamiltonian.")
+                .def_rw("coeff", &PauliCycleSum::coeff, "Scalar prefactor.")
+                .def_ro("data", &PauliCycleSum::data, "The list of PauliCycles.");
 }

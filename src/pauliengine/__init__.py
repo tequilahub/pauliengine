@@ -8,10 +8,13 @@ from ._core import (
     __omp_version__,
 )
 from ._version import __version__
+from .pauli_cycle import PauliCycle, PauliCycleSum
 from .pauli_string import PauliString
 from .qubit_hamiltonian import QubitHamiltonian, from_openfermion
 
 __all__ = [
+    "PauliCycle",
+    "PauliCycleSum",
     "PauliString",
     "QubitHamiltonian",
     "__build_type__",
