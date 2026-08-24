@@ -104,7 +104,7 @@ class PauliCycle {
                         }
                         return PauliCycleSum(1.0 / n, result);
                 }
-
+                //TODO: gleiche cycles erkennen.
 
         private:
                 static std::vector<int> support(const PauliString<Coeff>& ps) {

@@ -231,6 +231,9 @@ class QubitHamiltonian{
                 return QubitHamiltonian(std::move(temp_data));
         }
 
+        //TODO: Contains methode für Allles
+
+
 
         QubitHamiltonian compact(){
                 if (data.empty()) return *this;

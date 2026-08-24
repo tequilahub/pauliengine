@@ -24,4 +24,8 @@ class PauliCycleSum {
 
                 // Defined out-of-line in PauliCycle.h
                 QubitHamiltonian<Coeff> to_qubit_hamiltonian() const;
+
+                //TODO: Kommutator
+                //TODO: targeted kommatator Von Orbits , also ist ein orbit ein teilergebnis vom kommutator von zwei orbits
+                //      Falls möglich auch für cycles
 };

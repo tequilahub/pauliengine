@@ -21,6 +21,9 @@ const std::complex<double> I(0.0 , 1.0);
 
 inline int popcount(uint64_t x);
 void testSymengine();
+//TODO: hashable 
+
+
 
 // Small-buffer word storage for the symplectic bit representation: up to
 // kInlineWords 64-bit words (= 128 qubits) live inline without touching the
