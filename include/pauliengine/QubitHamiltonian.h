@@ -196,6 +196,60 @@ class QubitHamiltonian{
                 return true;
         }
 
+        // True if this Hamiltonian has a term acting as the given Pauli operator.
+        // Matches on the operator part (x, y) only and ignores the coefficient --
+        // the same notion of term identity used by compact() and operator==.
+        bool contains(const PauliString<Coeff>& ps) const {
+                for (const auto& term : this->data) {
+                        if (term.x == ps.x && term.y == ps.y) {
+                                return true;
+                        }
+                }
+                return false;
+        }
+
+        // Coefficient of a single target Pauli operator in the commutator
+        // [this, other], computed as a hash-join instead of the full O(|A||B|)
+        // pair scan (PauliEngine Features, "targeted commutators"). For a fixed
+        // term P and target R there is exactly one operator Q that can produce R,
+        // namely v(Q) = v(P) XOR v(R) (equivalently Q ∝ P·R). We hash one side by
+        // its operator signature and, for each term of the other side, look up the
+        // unique matching partner, accumulating the commutator coefficient of the
+        // target. Cost O(min(|A|,|B|)) lookups after building the map.
+        Coeff targeted_commutator(const QubitHamiltonian& other,
+                                  const PauliString<Coeff>& target) const {
+                using Map = std::unordered_map<PauliString<Coeff>, const PauliString<Coeff>*,
+                        PauliStringHash<Coeff>, PauliStringOperatorEqual<Coeff>>;
+                Coeff total(0.0);
+
+                // Iterate the smaller side; hash the larger one (keyed by operator).
+                const bool iter_this = this->data.size() <= other.data.size();
+                const std::vector<PauliString<Coeff>>& outer = iter_this ? this->data : other.data;
+                const std::vector<PauliString<Coeff>>& inner = iter_this ? other.data : this->data;
+
+                Map lut;
+                lut.reserve(inner.size());
+                for (const auto& term : inner) {
+                        lut.emplace(term, &term);
+                }
+
+                for (const auto& t : outer) {
+                        // Operator of the unique partner that can produce `target`.
+                        const PauliString<Coeff> partner_op = t * target;
+                        const auto it = lut.find(partner_op);
+                        if (it == lut.end()) {
+                                continue;
+                        }
+                        // Preserve the [this, other] ordering (the commutator is
+                        // antisymmetric): the term from `this` is always the left factor.
+                        const PauliString<Coeff> c = iter_this
+                                ? t.commutator(*it->second)
+                                : it->second->commutator(t);
+                        total = total + c.coeff;
+                }
+                return total;
+        }
+
         QubitHamiltonian set_all_coeff(std::complex<double> value) const {
                 std::vector<PauliString<Coeff>> temp_data;
                 temp_data.reserve(this->data.size());

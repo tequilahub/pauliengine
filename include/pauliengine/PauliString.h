@@ -226,6 +226,27 @@ class PauliString {
                         }
                 }
 
+                // Value hash over the operator part (x, y) only. This is consistent
+                // with operator== (equal strings share x and y, hence the same hash)
+                // while deliberately ignoring the coefficient: hashing a complex or
+                // symbolic coefficient consistently with the numeric/symbolic
+                // equality used above is error-prone (e.g. -0.0 == 0.0, or
+                // (x+1)^2 == x^2+2x+1), so strings differing only by coefficient are
+                // allowed to collide. Both x and y are trimmed of trailing zero
+                // words on construction, so equal strings always hash identically.
+                size_t hash() const {
+                        size_t h = 0xcbf29ce484222325ULL;
+                        const auto mix = [&h](const WordVec& v) {
+                                for (size_t i = 0; i < v.size(); ++i) {
+                                        h ^= std::hash<uint64_t>{}(v[i]) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+                                }
+                                h ^= std::hash<size_t>{}(v.size()) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+                        };
+                        mix(x);
+                        mix(y);
+                        return h;
+                }
+
                 PauliString operator*(const PauliString& other) const {
                         // Source: https://arxiv.org/pdf/2103.02202 figure 12
                         const uint64_t *x1 = x.data();
@@ -433,6 +454,19 @@ class PauliString {
                         PauliString result = (*this) * other;
                         result.coeff = result.coeff * 2.0;
                         return result;
+                }
+
+                // Coefficient of a single target operator in [this, other]. Since the
+                // commutator of two Pauli strings is at most one term (2*PQ up to phase,
+                // or 0), this just checks whether that term's operator matches `target`
+                // and returns its coefficient, else 0. Same O(n) cost as the full
+                // commutator (per PauliEngine Features) — provided for API uniformity.
+                Coeff targeted_commutator(const PauliString& other, const PauliString& target) const {
+                        const PauliString c = this->commutator(other);
+                        if (c.x == target.x && c.y == target.y) {
+                                return c.coeff;
+                        }
+                        return Coeff(0.0);
                 }
 
                 Coeff get_coeff() const {

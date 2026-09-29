@@ -1099,3 +1099,27 @@ class TestSymbolicEquality:
 
     def test_different_symbols_unequal(self):
         assert _symbolic_qh(("a", {0: "X"})) != _symbolic_qh(("b", {0: "X"}))
+
+
+class TestContains:
+    def test_contains_matches_operator_ignoring_coeff(self):
+        qh = _complex_qh((1.0, {0: "X", 2: "Y"}), (2.0, {1: "Z"}))
+        assert qh.contains(pe.PauliString(1.0, {0: "X", 2: "Y"}))
+        assert pe.PauliString(9.0, {0: "X", 2: "Y"}) in qh  # coefficient ignored
+        assert not qh.contains(pe.PauliString(1.0, {1: "X"}))
+
+
+class TestTargetedCommutator:
+    def test_matches_full_commutator(self):
+        a = _complex_qh((1.0, {0: "X", 1: "Y"}), (0.5, {0: "Z"}))
+        b = _complex_qh((2.0, {0: "Y"}), (1.0, {1: "X", 2: "Z"}))
+        full = a.commutator(b)
+        fd = {tuple(sorted(d.items())): complex(c) for c, d in full.to_dictionary()}
+        for key, c in fd.items():
+            target = pe.PauliString(1.0, dict(key))
+            assert a.targeted_commutator(b, target) == pytest.approx(c)
+
+    def test_absent_target_is_zero(self):
+        a = _complex_qh((1.0, {0: "X"}))
+        b = _complex_qh((1.0, {1: "Z"}))  # disjoint -> commute -> empty commutator
+        assert a.targeted_commutator(b, pe.PauliString(1.0, {0: "X", 1: "Z"})) == pytest.approx(0j)

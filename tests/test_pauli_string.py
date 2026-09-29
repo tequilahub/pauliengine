@@ -670,3 +670,24 @@ class TestPauliStringSubs:
         ps = pe.PauliString("b*a**2", {1: "Z"})
         d = ps.diff("a").subs({"a": 3.0 + 0j, "b": 2.0 + 0j})
         assert _core.PauliStringSymbolic.to_complex(d.get_coeff()) == pytest.approx(12.0 + 0j)
+
+
+class TestTargetedCommutator:
+    def test_matches_full_commutator(self):
+        a = pe.PauliString(1.0, {0: "X", 1: "Y"})
+        b = pe.PauliString(2.0, {0: "Z"})
+        full = a.commutator(b)
+        coeff, ops = full.to_dictionary()
+        target = pe.PauliString(1.0, dict(ops))
+        assert a.targeted_commutator(b, target) == pytest.approx(complex(coeff))
+
+    def test_non_matching_target_is_zero(self):
+        a = pe.PauliString(1.0, {0: "X", 1: "Y"})
+        b = pe.PauliString(1.0, {0: "Z"})
+        # [X0 Y1, Z0] acts on qubits 0,1; a different operator has coefficient 0.
+        assert a.targeted_commutator(b, pe.PauliString(1.0, {0: "X"})) == pytest.approx(0j)
+
+    def test_commuting_pair_is_zero(self):
+        a = pe.PauliString(1.0, {0: "X"})
+        b = pe.PauliString(1.0, {1: "Z"})  # disjoint support -> commute
+        assert a.targeted_commutator(b, pe.PauliString(1.0, {0: "X", 1: "Z"})) == pytest.approx(0j)

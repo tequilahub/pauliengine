@@ -24,4 +24,12 @@ class PauliCycleSum {
 
                 // Defined out-of-line in PauliCycle.h
                 QubitHamiltonian<Coeff> to_qubit_hamiltonian() const;
+
+                bool contains(const PauliCycle& cycle) const;
+
+                PauliCycleSum commutator(const PauliCycleSum& other) const;
+
+                PauliCycleSum multiply(const PauliCycleSum& other) const;
+
+                Coeff targeted_commutator(const PauliCycleSum& other, const PauliCycle& target) const;
 };

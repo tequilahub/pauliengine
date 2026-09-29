@@ -28,6 +28,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 
 from . import hardware
+from .benchmark import route_stats
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -104,8 +105,7 @@ def _plot_one(
             continue
         plotted_any = True
         xs = [p[scaling_axis] for p in points]
-        ys = [p["time_mean_s"] for p in points]
-        yerr = [p["time_stdev_s"] for p in points]
+        ys, yerr = zip(*(route_stats(p) for p in points))
         fixed_values.update(p[fixed_axis] for p in points)
         ax.errorbar(xs, ys, yerr=yerr, marker="o", capsize=3, label=run["_display"])
 
@@ -114,7 +114,7 @@ def _plot_one(
         return False
 
     ax.set_xlabel(scaling_axis)
-    ax.set_ylabel("time [s] (mean ± stdev)")
+    ax.set_ylabel("time [s] (geo. mean ± geo. spread)")
     fixed_str = ",".join(str(v) for v in sorted(fixed_values))
     ax.set_title(f"{op} · {coeff_kind}  —  scaling with {scaling_axis}  ({fixed_axis}={fixed_str})")
     ax.grid(True, ls="--", alpha=0.4)
@@ -153,8 +153,8 @@ def _print_speedup_table(runs: list[dict]) -> None:
             base = base_index.get(key)
             if base is None:
                 continue
-            base_t = base["time_mean_s"]
-            this_t = m["time_mean_s"]
+            base_t = route_stats(base)[0]
+            this_t = route_stats(m)[0]
             speedup = base_t / this_t if this_t > 0 else float("inf")
             marker = ""
             if speedup >= 1.05:

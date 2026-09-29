@@ -42,14 +42,14 @@ from pauliengine._core import PauliCycleComplex
 #   python -m tools.benchmarks.cycle_benchmark   (run as a package module)
 #   python cycle_benchmark.py                    (run as a plain script)
 if __package__:
-    from . import hardware
-    from .benchmark import _time_call
+    from ..utils import hardware
+    from ..utils.benchmark import _time_call, route_stats
 else:
     # Plain-script mode: put the repo root on sys.path and import via the
     # package, so intra-package imports inside benchmark.py resolve too.
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from tools.benchmarks import hardware
-    from tools.benchmarks.benchmark import _time_call
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from tools.benchmarks.utils import hardware
+    from tools.benchmarks.utils.benchmark import _time_call, route_stats
 
 _PAULI_OPS = ("X", "Y", "Z")
 
@@ -126,20 +126,12 @@ def measure_point(n_qubits: int, repeats: int, warmup: int, seed: int,
 
     n_terms = len(naive_call())  # size of the resulting commutator operator
 
-    n_min, n_mean, n_std = _time_call(naive_call, repeats=repeats, warmup=warmup)
-    c_min, c_mean, c_std = _time_call(cycle_call, repeats=repeats, warmup=warmup)
-
     return {
         "n_qubits": n_qubits,
         "result_terms": n_terms,
         "repeats": repeats,
-        "naive_time_min_s": n_min,
-        "naive_time_mean_s": n_mean,
-        "naive_time_stdev_s": n_std,
-        "cycle_time_min_s": c_min,
-        "cycle_time_mean_s": c_mean,
-        "cycle_time_stdev_s": c_std,
-        "speedup_mean": (n_mean / c_mean) if c_mean > 0 else float("nan"),
+        "naive_times_s": _time_call(naive_call, repeats=repeats, warmup=warmup),
+        "cycle_times_s": _time_call(cycle_call, repeats=repeats, warmup=warmup),
     }
 
 
@@ -157,20 +149,19 @@ def plot(payload: dict, out_path: Path) -> None:
         ("naive", "naive: full QubitHamiltonian commutator", "s"),
         ("cycle", f"cycle: PauliCycle", "o"),
     ):
-        ys = [m[f"{key}_time_mean_s"] for m in ms]
-        yerr = [m[f"{key}_time_stdev_s"] for m in ms]
+        ys, yerr = zip(*(route_stats(m, key) for m in ms))
         ax.errorbar(xs, ys, yerr=yerr, marker=marker, capsize=3, label=label)
     ax.set_xscale("log", base=2)
     ax.set_yscale("log")
     weight_label = "dense" if weight is None else f"weight {weight}"
     ax.set_xlabel("n_qubits  (= number of rotations)")
-    ax.set_ylabel("commutator time [s] (mean ± stdev)")
+    ax.set_ylabel("commutator time [s] (geo. mean ± geo. spread)")
     ax.set_title(f"Pauli-cycle vs. full QubitHamiltonian commutator ({weight_label})")
     ax.grid(True, which="both", ls="--", alpha=0.4)
     ax.legend(fontsize=8)
 
     # Right: speedup factor.
-    speedups = [m["speedup_mean"] for m in ms]
+    speedups = [route_stats(m, "naive")[0] / route_stats(m, "cycle")[0] for m in ms]
     ax2.plot(xs, speedups, marker="o", color="tab:green")
     ax2.axhline(1.0, color="gray", ls="--", alpha=0.6)
     ax2.set_xscale("log", base=2)
@@ -213,7 +204,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    output = args.output or (Path(__file__).parent / "results" / f"cycle-{stamp}.json")
+    output = args.output or (Path(__file__).resolve().parents[1] / "results" / f"cycle-{stamp}.json")
     output.parent.mkdir(parents=True, exist_ok=True)
 
     weight = None if args.weight <= 0 else args.weight
@@ -225,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
         "label": args.label,
         "benchmark": "pauli_cycle_commutator",
