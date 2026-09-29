@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-09-30
+
 ### Added
 
 - `QubitHamiltonian.contains(pauli_string)` returns the coefficient of a Pauli
@@ -49,5 +51,6 @@ Starting point of this changelog; the release on PyPI at the time it was created
 
 - Deployment workflow for publishing to PyPI.
 
-[Unreleased]: https://github.com/tequilahub/pauliengine/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/tequilahub/pauliengine/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/tequilahub/pauliengine/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/tequilahub/pauliengine/compare/v0.1.2...v0.1.3
