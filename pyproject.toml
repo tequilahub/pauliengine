@@ -89,6 +89,9 @@ cmake.version = "CMakeLists.txt"
 cmake.build-type = "Release"
 cmake.args = [
   "-DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake",
+  # Multi-config generators (Visual Studio) would also generate a Debug config,
+  # for which Conan provides no libraries. Ignored by single-config generators.
+  "-DCMAKE_CONFIGURATION_TYPES=Release",
 ]
 ninja.make-fallback = false
 sdist.exclude = [

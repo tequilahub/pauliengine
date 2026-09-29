@@ -670,3 +670,80 @@ class TestPauliStringSubs:
         ps = pe.PauliString("b*a**2", {1: "Z"})
         d = ps.diff("a").subs({"a": 3.0 + 0j, "b": 2.0 + 0j})
         assert _core.PauliStringSymbolic.to_complex(d.get_coeff()) == pytest.approx(12.0 + 0j)
+
+
+class TestHash:
+    def test_encoding(self):
+        # base-4 digit per qubit: I=0, X=1, Y=2, Z=3
+        assert pe.PauliString(1.0, {0: "X"}).get_hash() == 1
+        assert pe.PauliString(1.0, {0: "Y"}).get_hash() == 2
+        assert pe.PauliString(1.0, {0: "Z"}).get_hash() == 3
+        assert pe.PauliString(1.0, {0: "X", 2: "Z"}).get_hash() == 1 + 3 * 4**2
+
+    def test_identity_is_zero(self):
+        assert pe.PauliString(1.0, {}).get_hash() == 0
+        assert pe.PauliString(1.0, {3: "I"}).get_hash() == 0
+
+    def test_coefficient_ignored(self):
+        ops = {1: "Y", 4: "Z"}
+        assert pe.PauliString(2.0, ops).get_hash() == pe.PauliString(-1j, ops).get_hash()
+        assert pe.PauliString("a*b", ops).get_hash() == pe.PauliString(1.0, ops).get_hash()
+
+    def test_distinct_operators_distinct_hash(self):
+        assert pe.PauliString(1.0, {0: "X"}).get_hash() != pe.PauliString(1.0, {1: "X"}).get_hash()
+
+    @pytest.mark.parametrize(
+        "ops",
+        [
+            {},
+            {0: "X"},
+            {0: "X", 1: "Y", 2: "Z"},
+            {31: "Z", 32: "X", 33: "Y"},  # crosses the 32-qubit limb boundary
+            {63: "Y", 64: "Z"},  # crosses the 64-qubit word boundary
+            {5: "X", 130: "Z", 200: "Y"},  # beyond the inline word buffer
+        ],
+    )
+    def test_roundtrip_complex(self, ops):
+        ps = pe.PauliString(1.5 - 2j, ops)
+        h = ps.get_hash()
+        back = pe.PauliString.from_hash(h, 1.5 - 2j)
+        assert back == ps
+        assert back.get_hash() == h
+        assert isinstance(back, _core.PauliStringComplex)
+
+    def test_large_hash_value(self):
+        assert pe.PauliString(1.0, {200: "Y"}).get_hash() == 2 * 4**200
+
+    def test_from_hash_default_coeff(self):
+        ps = pe.PauliString.from_hash(1 + 3 * 4**2)
+        assert ps == pe.PauliString(1.0, {0: "X", 2: "Z"})
+
+    def test_from_hash_symbolic(self):
+        ps = pe.PauliString.from_hash(pe.PauliString(1.0, {0: "Y", 70: "X"}).get_hash(), "a")
+        assert isinstance(ps, _core.PauliStringSymbolic)
+        assert ps == pe.PauliString("a", {0: "Y", 70: "X"})
+        assert str(_core.PauliStringSymbolic.from_hash(3).get_coeff()) == "1"
+
+    def test_from_hash_negative_raises(self):
+        with pytest.raises(ValueError):
+            pe.PauliString.from_hash(-1)
+
+
+class TestDunderHash:
+    def test_hashable_in_set_and_dict(self):
+        a = pe.PauliString(1.0, {0: "X", 3: "Z"})
+        b = pe.PauliString(1.0, {0: "X", 3: "Z"})
+        assert len({a, b}) == 1
+        assert {a: "value"}[b] == "value"
+
+    def test_coefficient_ignored(self):
+        ops = {2: "Y", 70: "X"}
+        assert hash(pe.PauliString(1.0, ops)) == hash(pe.PauliString(-3j, ops))
+        assert hash(pe.PauliString("a", ops)) == hash(pe.PauliString("2*b", ops))
+
+    def test_fixed_size(self):
+        assert abs(hash(pe.PauliString(1.0, {500: "Z"}))) < 2**64
+
+    def test_symbolic_hashable(self):
+        ps = pe.PauliString("a", {1: "Z"})
+        assert ps in {ps}

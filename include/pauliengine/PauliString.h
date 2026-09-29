@@ -310,6 +310,37 @@ class PauliString {
                         return true;
                 }
 
+                // Coefficient-independent, invertible key of the operator part: the
+                // base-4 number sum_q p_q * 4^q with p_q = x_q + 2*y_q (I=0, X=1, Y=2,
+                // Z=3), as little-endian 64-bit limbs (limb k holds qubits 32k..32k+31).
+                // Trailing zero limbs are dropped, so the identity maps to {}.
+                std::vector<uint64_t> get_hash() const {
+                        std::vector<uint64_t> limbs(2 * this->x.size());
+                        for (size_t w = 0; w < this->x.size(); ++w) {
+                                limbs[2 * w] = spread_bits(static_cast<uint32_t>(this->x[w]))
+                                        | (spread_bits(static_cast<uint32_t>(this->y[w])) << 1);
+                                limbs[2 * w + 1] = spread_bits(static_cast<uint32_t>(this->x[w] >> 32))
+                                        | (spread_bits(static_cast<uint32_t>(this->y[w] >> 32)) << 1);
+                        }
+                        while (!limbs.empty() && limbs.back() == 0) {
+                                limbs.pop_back();
+                        }
+                        return limbs;
+                }
+
+                // Inverse of get_hash(): the Pauli string with that operator part and
+                // the given coefficient.
+                static PauliString from_hash(const std::vector<uint64_t>& limbs, Coeff coeff) {
+                        const size_t n_words = (limbs.size() + 1) / 2;
+                        std::vector<uint64_t> new_x(n_words, 0), new_y(n_words, 0);
+                        for (size_t k = 0; k < limbs.size(); ++k) {
+                                const uint64_t shift = (k % 2) * 32;
+                                new_x[k / 2] |= static_cast<uint64_t>(compact_bits(limbs[k])) << shift;
+                                new_y[k / 2] |= static_cast<uint64_t>(compact_bits(limbs[k] >> 1)) << shift;
+                        }
+                        return PauliString(new_x, new_y, coeff);
+                }
+
                 // Number of qubits with non-identity operator.
                 size_t size() const {
                         size_t count = 0;
@@ -660,6 +691,28 @@ class PauliString {
                         }
                         x.resize(n);
                         y.resize(n);
+                }
+
+                // Spreads the 32 bits of v to the even bit positions of a 64-bit word.
+                static uint64_t spread_bits(uint32_t v) {
+                        uint64_t r = v;
+                        r = (r | (r << 16)) & 0x0000FFFF0000FFFFULL;
+                        r = (r | (r << 8))  & 0x00FF00FF00FF00FFULL;
+                        r = (r | (r << 4))  & 0x0F0F0F0F0F0F0F0FULL;
+                        r = (r | (r << 2))  & 0x3333333333333333ULL;
+                        r = (r | (r << 1))  & 0x5555555555555555ULL;
+                        return r;
+                }
+
+                // Inverse of spread_bits: gathers the even bits of v into 32 bits.
+                static uint32_t compact_bits(uint64_t v) {
+                        v &= 0x5555555555555555ULL;
+                        v = (v | (v >> 1))  & 0x3333333333333333ULL;
+                        v = (v | (v >> 2))  & 0x0F0F0F0F0F0F0F0FULL;
+                        v = (v | (v >> 4))  & 0x00FF00FF00FF00FFULL;
+                        v = (v | (v >> 8))  & 0x0000FFFF0000FFFFULL;
+                        v = (v | (v >> 16)) & 0x00000000FFFFFFFFULL;
+                        return static_cast<uint32_t>(v);
                 }
 
                 void get_symplectic_form(size_t pauli_index, uint64_t& mask, const std::string& pauli_char) {

@@ -81,6 +81,22 @@ class PauliStringFactory:
 
         return builder(coeff, pauli_strings)
 
+    def from_hash(
+        self, hash: int, coeff: complex | str = 1
+    ) -> PauliStringComplex | PauliStringSymbolic:
+        """Inverse of ``get_hash()``: the Pauli string with that operator part.
+
+        The coefficient type selects the class exactly as in ``__call__``.
+        """
+        builder = self._builders.get(type(coeff))
+        if not builder:
+            raise ValueError(
+                f"{self._name} of type {type(coeff)} has no builder registered"
+            )
+        if builder == PauliStringSymbolic:
+            coeff = Expression(coeff)
+        return builder.from_hash(hash, coeff)
+
     def to_complex(self, expr: Expression) -> complex:
         return PauliStringSymbolic.to_complex(expr)
 

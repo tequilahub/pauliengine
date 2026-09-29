@@ -16,6 +16,41 @@
 namespace nb = nanobind;
 using namespace pauliengine;
 
+// PauliString::get_hash() limbs (little-endian 64-bit) -> arbitrary-size Python int.
+static nb::int_ hash_limbs_to_int(const std::vector<uint64_t>& limbs) {
+        static const char digits[] = "0123456789abcdef";
+        std::string hex = "0";
+        for (size_t i = limbs.size(); i-- > 0; ) {
+                for (int s = 60; s >= 0; s -= 4) {
+                        hex.push_back(digits[(limbs[i] >> s) & 0xF]);
+                }
+        }
+        PyObject* value = PyLong_FromString(hex.c_str(), nullptr, 16);
+        if (!value) {
+                throw nb::python_error();
+        }
+        return nb::steal<nb::int_>(value);
+}
+
+// Python int -> little-endian 64-bit limbs for PauliString::from_hash().
+static std::vector<uint64_t> hash_int_to_limbs(const nb::int_& value) {
+        PyObject* hex_obj = PyNumber_ToBase(value.ptr(), 16);
+        if (!hex_obj) {
+                throw nb::python_error();
+        }
+        const std::string hex = nb::cast<std::string>(nb::steal(hex_obj));  // "0x..." or "-0x..."
+        if (hex[0] == '-') {
+                throw nb::value_error("from_hash: hash must be non-negative");
+        }
+        std::vector<uint64_t> limbs;
+        for (size_t end = hex.size(); end > 2; ) {
+                const size_t begin = end >= 2 + 16 ? end - 16 : 2;
+                limbs.push_back(std::stoull(hex.substr(begin, end - begin), nullptr, 16));
+                end = begin;
+        }
+        return limbs;
+}
+
 
 NB_MODULE(_core, m) {
 
@@ -103,6 +138,14 @@ NB_MODULE(_core, m) {
                 .def("size", &PauliString<std::complex<double>>::size, "Number of qubits with non-identity operator.")
                 .def("__len__", &PauliString<std::complex<double>>::size, "Number of qubits with non-identity operator.")
                 .def("count_y", &PauliString<std::complex<double>>::count_y, "Number of Y operators in the Pauli string.")
+                .def("__hash__", [](const PauliString<std::complex<double>>& ps) { return PauliStringHash<std::complex<double>>{}(ps); },
+                        "Fixed-size hash of the operator part (coefficient ignored); consistent with __eq__.")
+                .def("get_hash", [](const PauliString<std::complex<double>>& ps) { return hash_limbs_to_int(ps.get_hash()); },
+                        "Invertible int key of the operator part (coefficient ignored): sum_q p_q * 4**q with I=0, X=1, Y=2, Z=3.")
+                .def_static("from_hash", [](const nb::int_& hash, std::complex<double> coeff) {
+                                return PauliString<std::complex<double>>::from_hash(hash_int_to_limbs(hash), coeff);
+                        }, nb::arg("hash"), nb::arg("coeff") = std::complex<double>(1.0, 0.0),
+                        "Build the Pauli string whose get_hash() equals hash, with the given coefficient.")
                 .def("key_openfermion", &PauliString<std::complex<double>>::key_openfermion, "OpenFermion-style key as list of (Pauli, qubit) pairs.")
                 .def_prop_ro("x", [](const PauliString<std::complex<double>>& ps) { return ps.x.to_vector(); }, "Returns the x vector of the Pauli string.")
                 .def_prop_ro("y", [](const PauliString<std::complex<double>>& ps) { return ps.y.to_vector(); }, "Returns the y vector of the Pauli string.")
@@ -175,6 +218,18 @@ NB_MODULE(_core, m) {
                 .def("size", &PauliString<SymEngine::Expression>::size, "Number of qubits with non-identity operator.")
                 .def("__len__", &PauliString<SymEngine::Expression>::size, "Number of qubits with non-identity operator.")
                 .def("count_y", &PauliString<SymEngine::Expression>::count_y, "Number of Y operators in the Pauli string.")
+                .def("__hash__", [](const PauliString<SymEngine::Expression>& ps) { return PauliStringHash<SymEngine::Expression>{}(ps); },
+                        "Fixed-size hash of the operator part (coefficient ignored); consistent with __eq__.")
+                .def("get_hash", [](const PauliString<SymEngine::Expression>& ps) { return hash_limbs_to_int(ps.get_hash()); },
+                        "Invertible int key of the operator part (coefficient ignored): sum_q p_q * 4**q with I=0, X=1, Y=2, Z=3.")
+                .def_static("from_hash", [](const nb::int_& hash, const SymEngine::Expression& coeff) {
+                                return PauliString<SymEngine::Expression>::from_hash(hash_int_to_limbs(hash), coeff);
+                        }, nb::arg("hash"), nb::arg("coeff"),
+                        "Build the Pauli string whose get_hash() equals hash, with the given coefficient.")
+                .def_static("from_hash", [](const nb::int_& hash) {
+                                return PauliString<SymEngine::Expression>::from_hash(hash_int_to_limbs(hash), SymEngine::Expression(1));
+                        }, nb::arg("hash"),
+                        "Build the Pauli string whose get_hash() equals hash, with coefficient 1.")
                 .def("key_openfermion", &PauliString<SymEngine::Expression>::key_openfermion, "OpenFermion-style key as list of (Pauli, qubit) pairs.")
                 .def_prop_ro("x", [](const PauliString<SymEngine::Expression>& ps) { return ps.x.to_vector(); }, "Returns the x vector of the Pauli string.")
                 .def_prop_ro("y", [](const PauliString<SymEngine::Expression>& ps) { return ps.y.to_vector(); }, "Returns the y vector of the Pauli string.")
@@ -213,6 +268,11 @@ NB_MODULE(_core, m) {
                 .def("size", &QubitHamiltonian<std::complex<double>>::size, "Number of Pauli string terms.")
                 .def("commutator", &QubitHamiltonian<std::complex<double>>::commutator, "Returns commutator of two QubitHamiltonians")
                 .def("compact", &QubitHamiltonian<std::complex<double>>::compact, "Merges duplicate operator terms and removes zero-coefficient terms.")
+                .def("contains", [](const QubitHamiltonian<std::complex<double>>& qh, const PauliString<std::complex<double>>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
+                .def("contains", [](const QubitHamiltonian<std::complex<double>>& qh, const PauliString<SymEngine::Expression>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
+                .def("contains", [](const QubitHamiltonian<std::complex<double>>& qh, const std::unordered_map<int, std::string>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the Pauli string {qubit: 'X'} in the Hamiltonian (0 if absent).")
+                .def("contains", [](const QubitHamiltonian<std::complex<double>>& qh, const std::vector<std::pair<char, int>>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the Pauli string [('X', 0), ...] in the Hamiltonian (0 if absent).")
+                .def("contains", [](const QubitHamiltonian<std::complex<double>>& qh, const std::string& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the Pauli string 'XIZ' or 'X0 Z2' in the Hamiltonian (0 if absent).")
                 .def("set_all_coeff", &QubitHamiltonian<std::complex<double>>::set_all_coeff, nb::arg("value"), "Return a copy with every term's coefficient replaced by value.")
                 .def("simplify", &QubitHamiltonian<std::complex<double>>::simplify, nb::arg("threshold") = 0.0, "Removes terms whose coefficient magnitude is below threshold.")
                 .def("qubits", &QubitHamiltonian<std::complex<double>>::qubits, "Sorted list of qubit indices the Hamiltonian acts on non-trivially.")
@@ -267,6 +327,11 @@ NB_MODULE(_core, m) {
                 .def("commutator", &QubitHamiltonian<SymEngine::Expression>::commutator, "Returns commutator of two QubitHamiltonians")
                 .def("diff", &QubitHamiltonian<SymEngine::Expression>::diff, "Symbolic derivative wrt the named symbol.")
                 .def("compact", &QubitHamiltonian<SymEngine::Expression>::compact, "Merges duplicate operator terms and removes zero-coefficient terms.")
+                .def("contains", [](const QubitHamiltonian<SymEngine::Expression>& qh, const PauliString<SymEngine::Expression>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
+                .def("contains", [](const QubitHamiltonian<SymEngine::Expression>& qh, const PauliString<std::complex<double>>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
+                .def("contains", [](const QubitHamiltonian<SymEngine::Expression>& qh, const std::unordered_map<int, std::string>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the Pauli string {qubit: 'X'} in the Hamiltonian (0 if absent).")
+                .def("contains", [](const QubitHamiltonian<SymEngine::Expression>& qh, const std::vector<std::pair<char, int>>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the Pauli string [('X', 0), ...] in the Hamiltonian (0 if absent).")
+                .def("contains", [](const QubitHamiltonian<SymEngine::Expression>& qh, const std::string& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the Pauli string 'XIZ' or 'X0 Z2' in the Hamiltonian (0 if absent).")
                 .def("set_all_coeff", &QubitHamiltonian<SymEngine::Expression>::set_all_coeff, nb::arg("value"), "Return a copy with every term's coefficient replaced by value.")
                 .def("simplify", &QubitHamiltonian<SymEngine::Expression>::simplify, nb::arg("threshold") = 0.0, "Removes terms whose coefficient magnitude is below threshold.")
                 .def("qubits", &QubitHamiltonian<SymEngine::Expression>::qubits, "Sorted list of qubit indices the Hamiltonian acts on non-trivially.")

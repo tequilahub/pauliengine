@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <type_traits>
 #include <algorithm>
+#include <cctype>
+#include <sstream>
 
 #include "pauliengine/PauliString.h"
 
@@ -229,6 +231,69 @@ class QubitHamiltonian{
                         temp_data.push_back(ps.substitute(substitution_map));
                 }
                 return QubitHamiltonian(std::move(temp_data));
+        }
+
+        // Coefficient of the term whose operator part equals `ps`, or zero if the
+        // Hamiltonian has no such term. The coefficient of `ps` itself is ignored,
+        // so a query string of either coefficient type works. compact() keeps the
+        // operator parts unique, hence at most one term can match.
+        template<typename C>
+        Coeff contains(const PauliString<C>& ps) const {
+                for (const auto& term : this->data) {
+                        if (term.x == ps.x && term.y == ps.y) {
+                                return term.coeff;
+                        }
+                }
+                return make_zero();
+        }
+
+        // {qubit: "X"} as in PauliString(coeff, map).
+        Coeff contains(const std::unordered_map<int, std::string>& ops) const {
+                std::unordered_map<int, std::string> normalized;
+                for (const auto& [qubit, pauli] : ops) {
+                        if (pauli.size() != 1) {
+                                throw std::invalid_argument("contains: invalid Pauli operator '" + pauli + "'");
+                        }
+                        normalized[qubit] = std::string(1, normalize_pauli(pauli[0]));
+                }
+                return contains(PauliString<Coeff>(make_zero(), normalized));
+        }
+
+        // OpenFermion style [('X', 0), ('Z', 3)] as in PauliString((coeff, ops)).
+        Coeff contains(const std::vector<std::pair<char, int>>& ops) const {
+                std::vector<std::pair<char, int>> normalized;
+                normalized.reserve(ops.size());
+                for (const auto& [pauli, qubit] : ops) {
+                        normalized.emplace_back(normalize_pauli(pauli), qubit);
+                }
+                return contains(PauliString<Coeff>(std::make_pair(make_zero(), normalized)));
+        }
+
+        // Either a dense string "XIZY" (character i acts on qubit i, as in
+        // PauliString(coeff, string)) or a sparse one "X0 Z3" (as in the Python
+        // PauliString factory). Any digit in the string selects the sparse form.
+        Coeff contains(const std::string& ops) const {
+                std::vector<std::pair<char, int>> parsed;
+                const bool sparse = std::any_of(ops.begin(), ops.end(),
+                        [](unsigned char c) { return std::isdigit(c); });
+                if (sparse) {
+                        std::istringstream tokens(ops);
+                        std::string token;
+                        while (tokens >> token) {
+                                if (token.size() < 2 || !std::all_of(token.begin() + 1, token.end(),
+                                                [](unsigned char c) { return std::isdigit(c); })) {
+                                        throw std::invalid_argument("contains: invalid Pauli term '" + token + "', expected e.g. 'X0 Z3'");
+                                }
+                                parsed.emplace_back(token[0], std::stoi(token.substr(1)));
+                        }
+                } else {
+                        for (size_t i = 0; i < ops.size(); ++i) {
+                                if (!std::isspace(static_cast<unsigned char>(ops[i]))) {
+                                        parsed.emplace_back(ops[i], static_cast<int>(i));
+                                }
+                        }
+                }
+                return contains(parsed);
         }
 
 
@@ -772,6 +837,23 @@ class QubitHamiltonian{
                 } else {
                         return Coeff(1);
                 }
+        }
+
+        static Coeff make_zero() {
+                if constexpr (std::is_same_v<Coeff, std::complex<double>>) {
+                        return std::complex<double>(0.0, 0.0);
+                } else {
+                        return Coeff(0);
+                }
+        }
+
+        // Upper-cases a single Pauli label and rejects anything but I, X, Y, Z.
+        static char normalize_pauli(char c) {
+                const char upper = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                if (upper != 'I' && upper != 'X' && upper != 'Y' && upper != 'Z') {
+                        throw std::invalid_argument(std::string("contains: invalid Pauli operator '") + c + "'");
+                }
+                return upper;
         }
     static Matrix2D get_pauli_matrix(const std::string& p){static const std::complex<double> I(0,1);
         if (p == "I") return {{1,0},{0,1}};

@@ -1099,3 +1099,53 @@ class TestSymbolicEquality:
 
     def test_different_symbols_unequal(self):
         assert _symbolic_qh(("a", {0: "X"})) != _symbolic_qh(("b", {0: "X"}))
+
+
+class TestContains:
+    def _qh(self):
+        return _complex_qh((0.5, {0: "X", 2: "Z"}), (2.0, {1: "Y"}))
+
+    def test_pauli_string(self):
+        assert self._qh().contains(pe.PauliString(1.0, {0: "X", 2: "Z"})) == pytest.approx(0.5)
+
+    def test_query_coefficient_is_ignored(self):
+        assert self._qh().contains(pe.PauliString(7.0, {1: "Y"})) == pytest.approx(2.0)
+
+    def test_dict(self):
+        assert self._qh().contains({0: "X", 2: "Z"}) == pytest.approx(0.5)
+
+    def test_openfermion_style_list(self):
+        assert self._qh().contains([("X", 0), ("Z", 2)]) == pytest.approx(0.5)
+
+    def test_dense_string(self):
+        assert self._qh().contains("XIZ") == pytest.approx(0.5)
+        assert self._qh().contains("IY") == pytest.approx(2.0)
+
+    def test_sparse_string(self):
+        assert self._qh().contains("X0 Z2") == pytest.approx(0.5)
+
+    def test_lowercase_and_identity_padding(self):
+        assert self._qh().contains({0: "x", 2: "z", 5: "I"}) == pytest.approx(0.5)
+
+    def test_missing_term_is_zero(self):
+        qh = self._qh()
+        assert qh.contains({0: "X"}) == 0
+        assert qh.contains("ZZ") == 0
+
+    def test_identity(self):
+        qh = pe.QubitHamiltonian.unit() * 3.0
+        assert qh.contains({}) == pytest.approx(3.0)
+        assert qh.contains("") == pytest.approx(3.0)
+
+    def test_invalid_operator_raises(self):
+        with pytest.raises(ValueError):
+            self._qh().contains({0: "Q"})
+        with pytest.raises(ValueError):
+            self._qh().contains("X0 Zb")
+
+    def test_symbolic(self):
+        qh = _symbolic_qh(("a", {0: "X"}), ("2", {1: "Z"}))
+        assert str(qh.contains("XI")) == "a"
+        assert _core.PauliStringSymbolic.to_complex(qh.contains({1: "Z"})) == pytest.approx(2.0 + 0j)
+        assert _core.PauliStringSymbolic.to_complex(qh.contains(pe.PauliString(1.0, {1: "Z"}))) == pytest.approx(2.0 + 0j)
+        assert _core.PauliStringSymbolic.to_complex(qh.contains({0: "Y"})) == pytest.approx(0j)
