@@ -59,14 +59,14 @@ DISTINCT_BASES = ["XIY", "XYZI", "ZIIX", "XXYZ", "XYIZI"]
 
 
 class TestRotate:
-    # NOTE: PauliCycle stores its Base as the canonical representative of the
-    # rotation orbit (not the string passed in), so rotate()/base are relative to
-    # that representative. These tests therefore compare against ``pc.base``.
+    # NOTE: PauliCycle stores its Base exactly as passed in (construction does not
+    # unify), and rotate() is relative to that stored base. The tests compare
+    # against ``pc.base`` so they also hold after an explicit unify().
     @pytest.mark.parametrize("base", DISTINCT_BASES)
     def test_matches_python_rotation(self, base):
         n = len(base)
         pc = pe.PauliCycle(n, base)
-        stored = ps_to_str(pc.base, n)  # canonical representative
+        stored = ps_to_str(pc.base, n)  # the stored base
         for k in range(-n - 1, 2 * n + 2):
             got = ps_to_str(pc.rotate(k), n)
             expected = py_rotate(stored, k % n)
@@ -205,10 +205,13 @@ class TestCorollary3:
 
         # The cycle sum should contain exactly one term per shift k for which
         # [P, rotate(P', k)] != 0, i.e. the two operators anticommute.
+        # Different shifts can land in the same rotation orbit; the sum merges
+        # those, so count distinct orbits of the anticommuting products.
         expected_shifts = [
             k for k in range(n) if anticommute(base_a, py_rotate(base_b, k))
         ]
-        assert len(s.data) == len(expected_shifts)
+        products = [a.base.commutator(b.rotate(k)) for k in expected_shifts]
+        assert len(s.data) == len({pe.PauliCycle(n, ps) for ps in products})
         # Every retained cycle carries a non-zero (physical factor 2) coefficient.
         for cycle in s.data:
             assert cycle.base.coeff != 0
@@ -223,22 +226,20 @@ class TestCorollary3:
 
 
 class TestPauliCycleSum:
-    def test_prefactor(self):
-        n = 4
-        a = pe.PauliCycle(n, "XYZI")
-        b = pe.PauliCycle(n, "ZIXI")
-        s = a.commutator(b)
-        assert s.coeff == pytest.approx(1.0 / n)
-        assert 0 <= len(s.data) <= n
+    def test_no_global_prefactor(self):
+        # Each cycle carries its own coefficient; there is no separate prefactor.
+        s = pe.PauliCycleSum([pe.PauliCycle(3, "XII", 2.0)])
+        assert not hasattr(s, "coeff")
+        assert s.to_qubit_hamiltonian() == reference_hamiltonian("XII", 2.0)
 
     def test_contains_matches_rotation_orbit(self):
         n = 4
         c = pe.PauliCycle(n, "XYZI")
-        c.canonicalize()
-        s = pe.PauliCycleSum(1.0, [c])
-        # A rotation, once canonicalized, is recognised as the same orbit.
+        c.unify()
+        s = pe.PauliCycleSum([c])
+        # A rotation, once unified, is recognised as the same orbit.
         rot = pe.PauliCycle(n, py_rotate("XYZI", 1))
-        rot.canonicalize()
+        rot.unify()
         assert s.contains(rot)
         assert rot in s
         assert not s.contains(pe.PauliCycle(n, "IIII"))
@@ -289,7 +290,7 @@ class TestMultiply:
 
 class TestCycleSumAlgebra:
     def _sum(self, n, bases):
-        return pe.PauliCycleSum(1.0, [pe.PauliCycle(n, b) for b in bases])
+        return pe.PauliCycleSum([pe.PauliCycle(n, b) for b in bases])
 
     def test_commutator_matches_expanded(self):
         n = 4
@@ -307,13 +308,13 @@ class TestCycleSumAlgebra:
         assert (s1 * s2).to_qubit_hamiltonian() == h1 * h2  # __mul__ agrees
 
 
-# Canonical representative: equality / hashing across rotations
+# Unified representative: equality / hashing across rotations
 
 
 class TestEquality:
     @pytest.mark.parametrize("base", DISTINCT_BASES)
     def test_rotations_are_equal_and_hash_equal(self, base):
-        # operator== / hash canonicalize on demand, so no explicit canonicalize().
+        # operator== / hash unify on demand, so no explicit unify().
         n = len(base)
         a = pe.PauliCycle(n, base)
         for k in range(n):
@@ -323,7 +324,7 @@ class TestEquality:
         # A set of all rotations collapses to a single element.
         assert len({pe.PauliCycle(n, py_rotate(base, k)) for k in range(n)}) == 1
 
-    def test_equality_is_orbit_invariant_without_canonicalize(self):
+    def test_equality_is_orbit_invariant_without_unify(self):
         # Two rotations of the same base are equal straight from construction.
         a = pe.PauliCycle(4, "XYZI")
         rot = pe.PauliCycle(4, py_rotate("XYZI", 1))
@@ -359,8 +360,161 @@ class TestTargetedCommutator:
 
     def test_cycle_sum_targeted_matches_full(self):
         n = 4
-        s1 = pe.PauliCycleSum(1.0, [pe.PauliCycle(n, "XYZI"), pe.PauliCycle(n, "ZIXI")])
-        s2 = pe.PauliCycleSum(1.0, [pe.PauliCycle(n, "XXYZ"), pe.PauliCycle(n, "IZYX")])
+        s1 = pe.PauliCycleSum([pe.PauliCycle(n, "XYZI"), pe.PauliCycle(n, "ZIXI")])
+        s2 = pe.PauliCycleSum([pe.PauliCycle(n, "XXYZ"), pe.PauliCycle(n, "IZYX")])
         full = s1.commutator(s2)
         for term in full.data:
             assert s1.targeted_commutator(s2, term) == pytest.approx(self._coeff_of(full, term))
+
+
+# Input validation and invariants
+
+
+class TestValidation:
+    def test_base_beyond_n_qubits_raises(self):
+        with pytest.raises(ValueError):
+            pe.PauliCycle(3, {5: "X"})
+        with pytest.raises(ValueError):
+            pe.PauliCycle(3, "XIIZ")
+
+    def test_non_positive_n_qubits_raises(self):
+        with pytest.raises(ValueError):
+            pe.PauliCycle(0, "")
+
+    def test_identity_padding_beyond_n_is_fine(self):
+        # Trailing identities carry no support, so they are not out of range.
+        assert pe.PauliCycle(3, {0: "X", 7: "I"}) == pe.PauliCycle(3, "XII")
+
+    @pytest.mark.parametrize("op", ["commutator", "multiply"])
+    def test_n_qubits_mismatch_raises(self, op):
+        a, b = pe.PauliCycle(3, "XYZ"), pe.PauliCycle(4, "ZIXI")
+        with pytest.raises(ValueError):
+            getattr(a, op)(b)
+
+    def test_targeted_n_qubits_mismatch_raises(self):
+        a, b = pe.PauliCycle(4, "XYZI"), pe.PauliCycle(4, "ZIXI")
+        with pytest.raises(ValueError):
+            a.targeted_commutator(b, pe.PauliCycle(3, "XII"))
+
+    def test_sum_with_mixed_n_qubits_raises(self):
+        with pytest.raises(ValueError):
+            pe.PauliCycleSum([pe.PauliCycle(3, "XII"), pe.PauliCycle(4, "XIII")])
+
+    def test_n_qubits_is_read_only(self):
+        # Mutating it would silently invalidate the cached unified form.
+        c = pe.PauliCycle(4, "XIII")
+        with pytest.raises(AttributeError):
+            c.n_qubits = 3
+
+
+class TestSumMerging:
+    def test_commutator_merges_shifts_in_same_orbit(self):
+        # Shifts 0 and 2 of the period-2 base ZIZI give the same product orbit.
+        a, b = pe.PauliCycle(4, "XIII"), pe.PauliCycle(4, "ZIZI")
+        s = a.commutator(b)
+        for i in range(len(s.data)):
+            for j in range(i + 1, len(s.data)):
+                assert s.data[i] != s.data[j]
+        assert s.to_qubit_hamiltonian() == reference_hamiltonian("XIII").commutator(
+            reference_hamiltonian("ZIZI")
+        )
+
+    def test_constructor_merges_and_drops_zeros(self):
+        s = pe.PauliCycleSum([
+            pe.PauliCycle(4, "XYZI", 1.0),
+            pe.PauliCycle(4, py_rotate("XYZI", 1), 2.0),  # same orbit -> 3.0
+            pe.PauliCycle(4, "ZIII", 1.0),
+            pe.PauliCycle(4, "IZII", -1.0),  # cancels the previous one
+        ])
+        assert len(s) == 1
+        assert s.data[0].base.coeff == pytest.approx(3.0)
+
+    def test_contains_returns_coefficient(self):
+        s = pe.PauliCycleSum([pe.PauliCycle(4, "XYZI", 2.5)])
+        # any rotation, with any coefficient, finds the summand
+        assert s.contains(pe.PauliCycle(4, py_rotate("XYZI", 3), 7.0)) == pytest.approx(2.5)
+        assert s.contains(pe.PauliCycle(4, "ZZZZ")) == 0
+        assert pe.PauliCycle(4, "IXYZ") in s
+        assert pe.PauliCycle(4, "ZZZZ") not in s
+
+
+# A cycle is the sum over ALL n rotations, also for periodic bases
+
+
+class TestPeriodicBases:
+    def test_periodic_cycle_counts_multiplicity(self):
+        assert pe.PauliCycle(3, "ZZZ").to_qubit_hamiltonian() == pe.QubitHamiltonian(
+            [pe.PauliString(3.0, {0: "Z", 1: "Z", 2: "Z"})]
+        )
+        assert pe.PauliCycle(4, "XIXI").to_qubit_hamiltonian() == reference_hamiltonian("XIXI")
+
+    @pytest.mark.parametrize(
+        "base_a, base_b",
+        [("XIXI", "ZYII"), ("ZZZZ", "XIII"), ("XYXY", "ZIZI"), ("XXX", "YII")],
+    )
+    def test_commutator_and_product_match_naive(self, base_a, base_b):
+        n = len(base_a)
+        a, b = pe.PauliCycle(n, base_a), pe.PauliCycle(n, base_b)
+        ha, hb = reference_hamiltonian(base_a), reference_hamiltonian(base_b)
+        assert a.commutator(b).to_qubit_hamiltonian() == ha.commutator(hb)
+        assert a.multiply(b).to_qubit_hamiltonian() == ha * hb
+
+    def test_targeted_on_periodic(self):
+        a, b = pe.PauliCycle(4, "XIII"), pe.PauliCycle(4, "ZIZI")
+        full = a.commutator(b)
+        for term in full.data:
+            assert a.targeted_commutator(b, term) == pytest.approx(complex(term.base.coeff))
+
+
+# get_hash / from_hash
+
+
+class TestHash:
+    def test_rotation_invariant_and_coefficient_free(self):
+        base = "XIZIIYII"
+        keys = {pe.PauliCycle(8, py_rotate(base, k), complex(k + 1, -k)).get_hash() for k in range(8)}
+        assert len(keys) == 1
+
+    def test_consistent_with_eq(self):
+        a, b = pe.PauliCycle(4, "XIIZ"), pe.PauliCycle(4, "XIZI")
+        assert a != b and a.get_hash() != b.get_hash()
+        # same base string, different ring size -> different cycles, different keys
+        assert pe.PauliCycle(3, "XII").get_hash() != pe.PauliCycle(4, "XII").get_hash()
+
+    def test_layout(self):
+        # string key of the unified representative * 2**32 + n_qubits
+        c = pe.PauliCycle(5, "IIXIZ")
+        c.unify()
+        assert c.get_hash() == c.base.get_hash() * 2**32 + 5
+        assert pe.PauliCycle(7, "IIIIIII").get_hash() == 7  # identity
+
+    @pytest.mark.parametrize(
+        "n, base",
+        [(1, "X"), (4, "XYZI"), (4, "ZIZI"), (8, "YIIXIZII"), (70, {0: "X", 33: "Y", 69: "Z"}), (300, {2: "Z", 299: "X"})],
+    )
+    def test_roundtrip(self, n, base):
+        c = pe.PauliCycle(n, base, 2.5 - 1j)
+        back = pe.PauliCycle.from_hash(c.get_hash(), 2.5 - 1j)
+        assert back == c
+        assert back.n_qubits == n
+        assert back.base.coeff == 2.5 - 1j
+        assert back.get_hash() == c.get_hash()
+        assert back.to_qubit_hamiltonian() == c.to_qubit_hamiltonian()
+
+    def test_from_hash_base_is_unified(self):
+        c = pe.PauliCycle(8, "IIYIIXIZ")
+        u = pe.PauliCycle(8, "IIYIIXIZ")
+        u.unify()
+        assert pe.PauliCycle.from_hash(c.get_hash()).base == u.base
+
+    def test_from_hash_default_coeff(self):
+        assert pe.PauliCycle.from_hash(pe.PauliCycle(3, "XYI", 4.0).get_hash()).base.coeff == 1
+
+    def test_from_hash_invalid(self):
+        with pytest.raises(ValueError):
+            pe.PauliCycle.from_hash(-1)
+        with pytest.raises(ValueError):
+            pe.PauliCycle.from_hash(0)  # n_qubits = 0
+        with pytest.raises(ValueError):
+            # string acts on qubit 5 but n_qubits = 3
+            pe.PauliCycle.from_hash(pe.PauliString(1.0, {5: "X"}).get_hash() * 2**32 + 3)

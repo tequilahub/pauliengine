@@ -25,11 +25,11 @@ void testSymengine();
 
 
 
-// Small-buffer word storage for the symplectic bit representation: up to
-// kInlineWords 64-bit words (= 128 qubits) live inline without touching the
-// heap; longer strings fall back to a single heap allocation. Pauli string
-// multiplication creates one short-lived string per pair, so avoiding
-// malloc/free on that path matters.
+/// Small-buffer word storage for the symplectic bit representation: up to
+/// kInlineWords 64-bit words (= 128 qubits) live inline without touching the
+/// heap; longer strings fall back to a single heap allocation. Pauli string
+/// multiplication creates one short-lived string per pair, so avoiding
+/// malloc/free on that path matters.
 class WordVec {
     public:
         static constexpr size_t kInlineWords = 2;
@@ -92,7 +92,7 @@ class WordVec {
         const uint64_t* begin() const noexcept { return ptr_; }
         const uint64_t* end() const noexcept { return ptr_ + size_; }
 
-        // Grows zero-filled; shrinking never reallocates.
+        /// Grows zero-filled; shrinking never reallocates.
         void resize(size_t n) {
                 if (n > cap_) {
                         uint64_t* p = new uint64_t[n];
@@ -229,14 +229,14 @@ class PauliString {
                         }
                 }
 
-                // Value hash over the operator part (x, y) only. This is consistent
-                // with operator== (equal strings share x and y, hence the same hash)
-                // while deliberately ignoring the coefficient: hashing a complex or
-                // symbolic coefficient consistently with the numeric/symbolic
-                // equality used above is error-prone (e.g. -0.0 == 0.0, or
-                // (x+1)^2 == x^2+2x+1), so strings differing only by coefficient are
-                // allowed to collide. Both x and y are trimmed of trailing zero
-                // words on construction, so equal strings always hash identically.
+                /// Value hash over the operator part (x, y) only. This is consistent
+                /// with operator== (equal strings share x and y, hence the same hash)
+                /// while deliberately ignoring the coefficient: hashing a complex or
+                /// symbolic coefficient consistently with the numeric/symbolic
+                /// equality used above is error-prone (e.g. -0.0 == 0.0, or
+                /// (x+1)^2 == x^2+2x+1), so strings differing only by coefficient are
+                /// allowed to collide. Both x and y are trimmed of trailing zero
+                /// words on construction, so equal strings always hash identically.
                 size_t hash() const {
                         size_t h = 0xcbf29ce484222325ULL;
                         const auto mix = [&h](const WordVec& v) {
@@ -334,7 +334,38 @@ class PauliString {
                         return true;
                 }
 
-                // Number of qubits with non-identity operator.
+                /// Coefficient-independent, invertible key of the operator part: the
+                /// base-4 number sum_q p_q * 4^q with p_q = x_q + 2*y_q (I=0, X=1, Y=2,
+                /// Z=3), as little-endian 64-bit limbs (limb k holds qubits 32k..32k+31).
+                /// Trailing zero limbs are dropped, so the identity maps to {}.
+                std::vector<uint64_t> get_hash() const {
+                        std::vector<uint64_t> limbs(2 * this->x.size());
+                        for (size_t w = 0; w < this->x.size(); ++w) {
+                                limbs[2 * w] = spread_bits(static_cast<uint32_t>(this->x[w]))
+                                        | (spread_bits(static_cast<uint32_t>(this->y[w])) << 1);
+                                limbs[2 * w + 1] = spread_bits(static_cast<uint32_t>(this->x[w] >> 32))
+                                        | (spread_bits(static_cast<uint32_t>(this->y[w] >> 32)) << 1);
+                        }
+                        while (!limbs.empty() && limbs.back() == 0) {
+                                limbs.pop_back();
+                        }
+                        return limbs;
+                }
+
+                /// Inverse of get_hash(): the Pauli string with that operator part and
+                /// the given coefficient.
+                static PauliString from_hash(const std::vector<uint64_t>& limbs, Coeff coeff) {
+                        const size_t n_words = (limbs.size() + 1) / 2;
+                        std::vector<uint64_t> new_x(n_words, 0), new_y(n_words, 0);
+                        for (size_t k = 0; k < limbs.size(); ++k) {
+                                const uint64_t shift = (k % 2) * 32;
+                                new_x[k / 2] |= static_cast<uint64_t>(compact_bits(limbs[k])) << shift;
+                                new_y[k / 2] |= static_cast<uint64_t>(compact_bits(limbs[k] >> 1)) << shift;
+                        }
+                        return PauliString(new_x, new_y, coeff);
+                }
+
+                /// Number of qubits with non-identity operator.
                 size_t size() const {
                         size_t count = 0;
                         for (size_t i = 0; i < this->x.size(); i++) {
@@ -343,7 +374,7 @@ class PauliString {
                         return count;
                 }
 
-                // Number of Y operators (x bit = 0, y bit = 1).
+                /// Number of Y operators (x bit = 0, y bit = 1).
                 int count_y() const {
                         int y_count = 0;
                         for (size_t i = 0; i < this->x.size(); i++) {
@@ -352,7 +383,7 @@ class PauliString {
                         return y_count;
                 }
 
-                // Return a copy with coefficient set to 1.
+                /// Return a copy with coefficient set to 1.
                 PauliString naked() const {
                         Coeff one;
                         if constexpr (std::is_same_v<Coeff, std::complex<double>>) {
@@ -459,11 +490,11 @@ class PauliString {
                         return result;
                 }
 
-                // Coefficient of a single target operator in [this, other]. Since the
-                // commutator of two Pauli strings is at most one term (2*PQ up to phase,
-                // or 0), this just checks whether that term's operator matches `target`
-                // and returns its coefficient, else 0. Same O(n) cost as the full
-                // commutator (per PauliEngine Features) — provided for API uniformity.
+                /// Coefficient of a single target operator in [this, other]. Since the
+                /// commutator of two Pauli strings is at most one term (2*PQ up to phase,
+                /// or 0), this just checks whether that term's operator matches `target`
+                /// and returns its coefficient, else 0. Same O(n) cost as the full
+                /// commutator (per PauliEngine Features) — provided for API uniformity.
                 Coeff targeted_commutator(const PauliString& other, const PauliString& target) const {
                         const PauliString c = this->commutator(other);
                         if (c.x == target.x && c.y == target.y) {
@@ -481,16 +512,16 @@ class PauliString {
                         this->coeff = new_coeff;
                 }
 
-                // Project this Pauli string onto a computational-basis state
-                // for the listed qubits. state[i] = 0 means qubit `qubits[i]` is
-                // |0>, state[i] = 1 means |1>. Returns a NEW PauliString with the
-                // traced qubits removed;
-                //
-                // Rules per traced qubit q:
-                //   - I:  <s|I|s> = 1                 → keep as-is
-                //   - X:  <0|X|0> = <1|X|1> = 0       → result is 0
-                //   - Y:  <0|Y|0> = <1|Y|1> = 0       → result is 0
-                //   - Z:  <0|Z|0> = +1, <1|Z|1> = -1  → drop the Z, sign-flip if state=1
+                /// Project this Pauli string onto a computational-basis state
+                /// for the listed qubits. state[i] = 0 means qubit `qubits[i]` is
+                /// |0>, state[i] = 1 means |1>. Returns a NEW PauliString with the
+                /// traced qubits removed;
+                ///
+                /// Rules per traced qubit q:
+                ///   - I:  <s|I|s> = 1                 → keep as-is
+                ///   - X:  <0|X|0> = <1|X|1> = 0       → result is 0
+                ///   - Y:  <0|Y|0> = <1|Y|1> = 0       → result is 0
+                ///   - Z:  <0|Z|0> = +1, <1|Z|1> = -1  → drop the Z, sign-flip if state=1
                 PauliString trace_out_qubits(const std::vector<int>& qubits, const std::vector<int>& state) const {
                         if (qubits.size() != state.size()) {
                                 throw std::runtime_error("trace_out_qubits: qubits and state must have the same length");
@@ -528,8 +559,8 @@ class PauliString {
                         return PauliString(new_x, new_y, this->coeff * sign);
                 }
 
-                // Project this Pauli string onto an arbitrary single-qubit state
-                // |psi_i> = a_i |0> + b_i |1> for each traced qubit. 
+                /// Project this Pauli string onto an arbitrary single-qubit state
+                /// |psi_i> = a_i |0> + b_i |1> for each traced qubit.
                 PauliString trace_out_qubits(
                         const std::vector<int>& qubits,
                         const std::vector<std::pair<std::complex<double>, std::complex<double>>>& states
@@ -580,35 +611,32 @@ class PauliString {
                         return PauliString(new_x, new_y, this->coeff * factor);
                 }
 
-                std::vector<int> qubits() {
-                        std::vector<int> qubit_list(this->x.size() * BITS_IN_INTEGER);
-                        for (uint64_t i = 0; i < this->x.size(); i++) {
-                                uint64_t mask = 1;
-                                for (size_t bit = 0; bit < BITS_IN_INTEGER; bit++) {
-                                        if (((mask & this->x[i]) == mask) |((mask & this->y[i]) == mask)) {
-                                                qubit_list.push_back((int)(i * BITS_IN_INTEGER + bit));
-                                        }
+                /// Sorted indices of the qubits with a non-identity operator.
+                std::vector<int> qubits() const {
+                        std::vector<int> qubit_list;
+                        for (size_t i = 0; i < this->x.size(); i++) {
+                                uint64_t bits = this->x[i] | this->y[i];
+                                while (bits) {
+                                        qubit_list.push_back(static_cast<int>(i * BITS_IN_INTEGER + std::countr_zero(bits)));
+                                        bits &= bits - 1;
                                 }
                         }
                         return qubit_list;
                 }
 
-                std::vector<std::pair<char, int>> key_openfermion() {
-                        std::vector<std::pair<char, int>> result(this->x.size() * BITS_IN_INTEGER);
-                        uint64_t mask;
-                        for (int i = 0; i < this->x.size(); i++) {
-                                mask = 1;
-                                for (int j = 0; j < BITS_IN_INTEGER; j++) {
-                                        uint64_t x_bit = (mask & this->x[i]) == mask;
-                                        uint64_t y_bit = (mask & this->y[i]) == mask;
-                                        if (x_bit && y_bit) {
-                                                result.push_back({'Z', i * BITS_IN_INTEGER + j});
-                                        } else if (x_bit) {
-                                                result.push_back({'X', i * BITS_IN_INTEGER + j});
-                                        } else if (y_bit) {
-                                                result.push_back({'Y', i * BITS_IN_INTEGER + j});
-                                        }
-                                        mask = mask << 1;
+                /// OpenFermion-style key: (Pauli, qubit) pairs for the non-identity
+                /// sites, sorted by qubit.
+                std::vector<std::pair<char, int>> key_openfermion() const {
+                        std::vector<std::pair<char, int>> result;
+                        for (size_t i = 0; i < this->x.size(); i++) {
+                                uint64_t bits = this->x[i] | this->y[i];
+                                while (bits) {
+                                        const int j = std::countr_zero(bits);
+                                        const bool x_bit = (this->x[i] >> j) & 1ULL;
+                                        const bool y_bit = (this->y[i] >> j) & 1ULL;
+                                        const char pauli = (x_bit && y_bit) ? 'Z' : (x_bit ? 'X' : 'Y');
+                                        result.push_back({pauli, static_cast<int>(i * BITS_IN_INTEGER + j)});
+                                        bits &= bits - 1;
                                 }
                         }
                         return result;
@@ -688,8 +716,8 @@ class PauliString {
                 }
 
         private:
-                // Keep the representation canonical: equal operators must have
-                // equal word counts (compact() and operator== rely on it).
+                /// Keep the representation canonical: equal operators must have
+                /// equal word counts (compact() and operator== rely on it).
                 void trim_trailing_zero_words() {
                         size_t n = x.size();
                         while (n > 0 && x[n - 1] == 0 && y[n - 1] == 0) {
@@ -697,6 +725,28 @@ class PauliString {
                         }
                         x.resize(n);
                         y.resize(n);
+                }
+
+                /// Spreads the 32 bits of v to the even bit positions of a 64-bit word.
+                static uint64_t spread_bits(uint32_t v) {
+                        uint64_t r = v;
+                        r = (r | (r << 16)) & 0x0000FFFF0000FFFFULL;
+                        r = (r | (r << 8))  & 0x00FF00FF00FF00FFULL;
+                        r = (r | (r << 4))  & 0x0F0F0F0F0F0F0F0FULL;
+                        r = (r | (r << 2))  & 0x3333333333333333ULL;
+                        r = (r | (r << 1))  & 0x5555555555555555ULL;
+                        return r;
+                }
+
+                /// Inverse of spread_bits: gathers the even bits of v into 32 bits.
+                static uint32_t compact_bits(uint64_t v) {
+                        v &= 0x5555555555555555ULL;
+                        v = (v | (v >> 1))  & 0x3333333333333333ULL;
+                        v = (v | (v >> 2))  & 0x0F0F0F0F0F0F0F0FULL;
+                        v = (v | (v >> 4))  & 0x00FF00FF00FF00FFULL;
+                        v = (v | (v >> 8))  & 0x0000FFFF0000FFFFULL;
+                        v = (v | (v >> 16)) & 0x00000000FFFFFFFFULL;
+                        return static_cast<uint32_t>(v);
                 }
 
                 void get_symplectic_form(size_t pauli_index, uint64_t& mask, const std::string& pauli_char) {
@@ -737,10 +787,10 @@ struct PauliStringHash {
     }
 };
 
-// Equality comparator that only compares the operator part (x and y vectors),
-// ignoring the coefficient.  Required so that hash maps keyed by PauliString
-// treat two terms with the same operator but different coefficients as the
-// same key — which is what compact() and QH::operator== need.
+/// Equality comparator that only compares the operator part (x and y vectors),
+/// ignoring the coefficient.  Required so that hash maps keyed by PauliString
+/// treat two terms with the same operator but different coefficients as the
+/// same key — which is what compact() and QH::operator== need.
 template<typename Coeff>
 struct PauliStringOperatorEqual {
     bool operator()(const PauliString<Coeff>& a, const PauliString<Coeff>& b) const {

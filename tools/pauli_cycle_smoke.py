@@ -70,8 +70,7 @@ def main() -> None:
     # --- Way 1: commutator in the cycle basis --------------------------------
     banner("WAY 1 — cycle basis:  a.commutator(b)  ->  PauliCycleSum")
     s = a.commutator(b)
-    print(f"  PauliCycleSum.coeff (paper 1/n prefactor) = {s.coeff}")
-    print(f"  number of cycle terms in the sum          = {len(s.data)}")
+    print(f"  number of cycle terms in the sum = {len(s.data)}  (each carries its own coeff)")
     for i, cyc in enumerate(s.data):
         print(f"    term[{i}]: base = {ps_str(cyc.base, n)}  "
               f"coeff = {fmt_coeff(cyc.base.coeff)}  n_qubits = {cyc.n_qubits}")

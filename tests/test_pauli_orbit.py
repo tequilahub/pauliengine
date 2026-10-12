@@ -59,7 +59,8 @@ class TestPauliOrbit:
 
     def test_validity_and_equality(self):
         assert pe.PauliOrbit(3, 1, 1, 1).is_valid()
-        assert not pe.PauliOrbit(3, 2, 2, 0).is_valid()  # p + q + r > n
+        with pytest.raises(ValueError):
+            pe.PauliOrbit(3, 2, 2, 0)  # p + q + r > n is rejected at construction
         assert pe.PauliOrbit(4, 1, 0, 2) == pe.PauliOrbit(4, 1, 0, 2)
         assert pe.PauliOrbit(4, 1, 0, 2) != pe.PauliOrbit(4, 0, 1, 2)
         assert len({pe.PauliOrbit(4, 1, 0, 2), pe.PauliOrbit(4, 1, 0, 2)}) == 1
@@ -177,3 +178,99 @@ class TestMultiply:
         b.add(pe.PauliOrbit(n, 1, 1, 0), 1.0)
         reference = orbitsum_to_qh(a) * orbitsum_to_qh(b)
         assert qh_close(orbitsum_to_qh(a.multiply(b)), reference)
+
+
+# Input validation and invariants
+
+
+class TestValidation:
+    @pytest.mark.parametrize("label", [(3, 5, 0, 0), (3, -1, 0, 0), (3, 2, 2, 0), (-1, 0, 0, 0)])
+    def test_invalid_label_raises(self, label):
+        with pytest.raises(ValueError):
+            pe.PauliOrbit(*label)
+
+    def test_max_qubits(self):
+        assert pe.PauliOrbit.max_qubits == 170
+        assert pe.PauliOrbit(170, 1, 0, 0).n_terms() == pytest.approx(170.0)
+        with pytest.raises(ValueError):
+            pe.PauliOrbit(171, 1, 0, 0)
+        with pytest.raises(ValueError):
+            pe.PauliOrbitSum(171)
+
+    def test_large_n_coefficients_are_finite(self):
+        import cmath
+
+        s = pe.PauliOrbit(170, 1, 0, 0).commutator(pe.PauliOrbit(170, 0, 1, 0))
+        assert len(s) > 0
+        assert all(cmath.isfinite(complex(c)) for c in s.coeffs)
+
+    @pytest.mark.parametrize("op", ["commutator", "multiply"])
+    def test_n_qubits_mismatch_raises(self, op):
+        with pytest.raises(ValueError):
+            getattr(pe.PauliOrbit(3, 1, 0, 0), op)(pe.PauliOrbit(4, 0, 1, 0))
+
+    def test_targeted_n_qubits_mismatch_raises(self):
+        with pytest.raises(ValueError):
+            pe.PauliOrbit(3, 1, 0, 0).targeted_commutator(pe.PauliOrbit(3, 0, 1, 0), pe.PauliOrbit(4, 0, 0, 1))
+
+    def test_sum_add_n_qubits_mismatch_raises(self):
+        with pytest.raises(ValueError):
+            pe.PauliOrbitSum(4).add(pe.PauliOrbit(3, 1, 0, 0), 1.0)
+
+    @pytest.mark.parametrize("field", ["n_qubits", "p", "q", "r"])
+    def test_fields_are_read_only(self, field):
+        # They define == and hash; mutating them would corrupt sets/dicts.
+        with pytest.raises(AttributeError):
+            setattr(pe.PauliOrbit(4, 1, 0, 0), field, 2)
+
+
+class TestInterface:
+    def test_targeted_returns_complex(self):
+        val = pe.PauliOrbit(4, 1, 0, 0).targeted_commutator(pe.PauliOrbit(4, 0, 1, 0), pe.PauliOrbit(4, 0, 0, 1))
+        assert isinstance(val, complex)
+
+    def test_sum_contains_returns_coefficient(self):
+        s = pe.PauliOrbitSum(4)
+        s.add(pe.PauliOrbit(4, 1, 0, 0), 1.5)
+        assert s.contains(pe.PauliOrbit(4, 1, 0, 0)) == pytest.approx(1.5)
+        assert s.contains(pe.PauliOrbit(4, 0, 1, 0)) == 0
+        assert pe.PauliOrbit(4, 1, 0, 0) in s
+        assert pe.PauliOrbit(4, 0, 1, 0) not in s
+
+    def test_add_after_prune_still_merges(self):
+        s = pe.PauliOrbitSum(4)
+        s.add(pe.PauliOrbit(4, 1, 0, 0), 1.0)
+        s.add(pe.PauliOrbit(4, 0, 1, 0), 1.0)
+        s.add(pe.PauliOrbit(4, 1, 0, 0), -1.0)
+        s.prune_zeros()
+        s.add(pe.PauliOrbit(4, 0, 1, 0), 2.0)  # must merge via the rebuilt index
+        assert len(s) == 1
+        assert s.contains(pe.PauliOrbit(4, 0, 1, 0)) == pytest.approx(3.0)
+
+
+# get_hash / from_hash
+
+
+class TestHash:
+    def test_layout(self):
+        assert pe.PauliOrbit(10, 1, 2, 3).get_hash() == 10 * 2**24 + 1 * 2**16 + 2 * 2**8 + 3
+
+    def test_consistent_with_eq(self):
+        assert pe.PauliOrbit(4, 1, 0, 2).get_hash() == pe.PauliOrbit(4, 1, 0, 2).get_hash()
+        assert pe.PauliOrbit(4, 1, 0, 2).get_hash() != pe.PauliOrbit(4, 0, 1, 2).get_hash()
+        assert pe.PauliOrbit(4, 1, 0, 0).get_hash() != pe.PauliOrbit(5, 1, 0, 0).get_hash()
+
+    @pytest.mark.parametrize("label", [(0, 0, 0, 0), (3, 1, 1, 1), (8, 2, 0, 5), (170, 85, 40, 45)])
+    def test_roundtrip(self, label):
+        o = pe.PauliOrbit(*label)
+        back = pe.PauliOrbit.from_hash(o.get_hash())
+        assert back == o
+        assert (back.n_qubits, back.p, back.q, back.r) == label
+
+    @pytest.mark.parametrize(
+        "key",
+        [-1, 2**32, 3 * 2**24 + 2 * 2**16 + 2 * 2**8],  # negative, too large, p+q+r > n
+    )
+    def test_from_hash_invalid(self, key):
+        with pytest.raises(ValueError):
+            pe.PauliOrbit.from_hash(key)

@@ -11,11 +11,17 @@ from ._core import (
 
 
 class PauliStringFactory:
-    """An implementation of the Factory method pattern."""
+    """Factory behind ``pauliengine.PauliString``.
+
+    Builds a ``PauliStringComplex`` for a numeric coefficient and a
+    ``PauliStringSymbolic`` for a string coefficient, and accepts several
+    formats for the Pauli operators.
+    """
 
     __slots__ = ["_builders", "_name"]
 
     def __init__(self, name: str, builders: dict[type, type]) -> None:
+        """Create the factory; ``builders`` maps coefficient types to classes."""
         self._builders = builders
         self._name = name
 
@@ -50,12 +56,30 @@ class PauliStringFactory:
         coeff: complex | str | tuple = 0,
         pauli_strings: str | dict[int, str] | Iterable = {0: "I"},
     ) -> PauliStringComplex | PauliStringSymbolic:
-        """Creates an instance of the specified type.
+        """Create a Pauli string.
 
-        Supports:
-        - PauliString(coeff, {index: 'X'})
-        - PauliString(coeff, [('X', index)])
-        - PauliString((coeff, [('X', index)]))   # OpenFermion-like tuple
+        Supported forms::
+
+            PauliString(coeff, {0: "X", 2: "Z"})      # dict {qubit: Pauli}
+            PauliString(coeff, "X0 Z2")               # space-separated string
+            PauliString(coeff, [("X", 0), ("Z", 2)])  # list of (Pauli, qubit)
+            PauliString((coeff, [("X", 0)]))          # OpenFermion-style tuple
+
+        Args:
+            coeff: The coefficient. ``int``, ``float`` or ``complex`` give a
+                ``PauliStringComplex``; a ``str`` such as ``"a*b"`` is parsed as
+                a symbolic expression and gives a ``PauliStringSymbolic``.
+                May also be a ``(coeff, terms)`` tuple, then ``pauli_strings``
+                is ignored.
+            pauli_strings: The Pauli operators in one of the forms above.
+                Defaults to the identity.
+
+        Returns:
+            The Pauli string, ``PauliStringComplex`` or ``PauliStringSymbolic``.
+
+        Raises:
+            ValueError: If the coefficient type or the operator format is not
+                supported.
         """
         if isinstance(coeff, tuple):
             if len(coeff) != 2:
@@ -81,7 +105,28 @@ class PauliStringFactory:
 
         return builder(coeff, pauli_strings)
 
+    def from_hash(
+        self, hash: int, coeff: complex | str = 1
+    ) -> PauliStringComplex | PauliStringSymbolic:
+        """Inverse of ``get_hash()``: the Pauli string with that operator part.
+
+        The coefficient type selects the class exactly as in ``__call__``.
+        """
+        builder = self._builders.get(type(coeff))
+        if not builder:
+            raise ValueError(
+                f"{self._name} of type {type(coeff)} has no builder registered"
+            )
+        if builder == PauliStringSymbolic:
+            coeff = Expression(coeff)
+        return builder.from_hash(hash, coeff)
+
     def to_complex(self, expr: Expression) -> complex:
+        """Evaluate a fully numeric symbolic coefficient to a complex number.
+
+        Raises:
+            RuntimeError: If ``expr`` still contains free symbols.
+        """
         return PauliStringSymbolic.to_complex(expr)
 
 

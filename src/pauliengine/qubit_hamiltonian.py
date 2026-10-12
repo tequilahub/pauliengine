@@ -87,7 +87,11 @@ def _qh_to_openfermion(qh: QubitHamiltonianComplex | QubitHamiltonianSymbolic):
 
 
 def from_openfermion(qop: Any) -> QubitHamiltonianComplex:
-    """Build a PauliEngine QubitHamiltonianComplex from an openfermion.QubitOperator."""
+    """Build a PauliEngine QubitHamiltonianComplex from an openfermion.QubitOperator.
+
+    Raises:
+        TypeError: If ``qop`` is not a ``QubitOperator``.
+    """
     if not _is_qubit_operator(qop):
         raise TypeError(
             "from_openfermion expects an openfermion.QubitOperator instance, "
@@ -100,22 +104,37 @@ def from_openfermion(qop: Any) -> QubitHamiltonianComplex:
 
 
 class QubitHamiltonianFactory:
-    """Factory for QubitHamiltonian instances with type-dispatched dispatch.
+    """Factory behind ``pauliengine.QubitHamiltonian``.
 
-    Accepts:
-      - list[PauliString]                  (homogeneous or mixed Complex/Symbolic)
-      - list[tuple[coeff, dict[int,str]]]  (coeff may be number or symbolic string)
-      - openfermion.QubitOperator          
-      - QubitHamiltonianComplex / QubitHamiltonianSymbolic (passthrough copy)
+    Builds a ``QubitHamiltonianComplex`` or, as soon as any term is symbolic, a
+    ``QubitHamiltonianSymbolic``. Accepted inputs:
+
+    - ``list[PauliString]`` (complex, symbolic or mixed)
+    - ``list[tuple[coeff, dict[int, str]]]`` (coeff a number or a symbolic string)
+    - ``openfermion.QubitOperator``
+    - an existing ``QubitHamiltonianComplex`` / ``QubitHamiltonianSymbolic`` (copied)
     """
 
     __slots__ = ["_builders", "_name"]
 
     def __init__(self, name: str, builders: dict[type, type]) -> None:
+        """Create the factory; ``builders`` maps term types to Hamiltonian classes."""
         self._builders = builders
         self._name = name
 
     def __call__(self, pauli_strings: Any) -> QubitHamiltonianComplex | QubitHamiltonianSymbolic:
+        """Create a qubit Hamiltonian from one of the accepted inputs.
+
+        Args:
+            pauli_strings: The terms, see the class docstring. An empty list
+                gives the zero Hamiltonian.
+
+        Returns:
+            The compacted Hamiltonian; symbolic if any term is symbolic.
+
+        Raises:
+            ValueError: If the input format is not supported.
+        """
         # OpenFermion QubitOperator → always Complex
         if _is_qubit_operator(pauli_strings):
             ps_list = _qubit_operator_to_ps_list(pauli_strings)
@@ -144,18 +163,25 @@ class QubitHamiltonianFactory:
 
     @staticmethod
     def from_openfermion(qop: Any) -> QubitHamiltonianComplex:
+        """Build a ``QubitHamiltonianComplex`` from an ``openfermion.QubitOperator``."""
         return from_openfermion(qop)
 
     @staticmethod
     def to_openfermion(qh):
+        """Convert a Hamiltonian into an ``openfermion.QubitOperator``.
+
+        Symbolic coefficients must be fully numeric. Requires ``openfermion``.
+        """
         return _qh_to_openfermion(qh)
 
     @staticmethod
     def zero() -> QubitHamiltonianComplex:
+        """The zero Hamiltonian (no terms)."""
         return QubitHamiltonianComplex.zero()
 
     @staticmethod
     def unit() -> QubitHamiltonianComplex:
+        """The identity Hamiltonian (one term, coefficient 1, no operators)."""
         return QubitHamiltonianComplex.unit()
 
 

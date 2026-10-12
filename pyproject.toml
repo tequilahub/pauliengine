@@ -57,7 +57,8 @@ interactive = [
   "tqdm>=4.65.0",
   "pylatexenc",
 ]
-# TODO Sphinx+Breathe
+# Documentation (docs/, see docs/conf.py); the C++ reference also needs doxygen.
+docs = ["sphinx>=7", "breathe>=4.35", "furo"]
 
 
 [tool.uv]

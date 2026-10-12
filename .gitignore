@@ -22,3 +22,6 @@ src/pauliengine/_version.py
 tools/benchmarks/results/*
 !tools/benchmarks/results/.gitkeep
 CMakeUserPresets.json
+
+# Sphinx / Doxygen build output
+docs/_build/

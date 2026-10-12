@@ -37,9 +37,9 @@ using Matrix2D = std::vector<std::vector<std::complex<double>>>;
 
 const std::complex<double> neg_I(0.0 , -1.0);
 
-// Tag type used by the fast-path constructor below: pass this when the caller
-// already guarantees the input vector is compacted (deduplicated + zero-filtered).
-// Lets operations like operator* skip a redundant compact() at the end.
+/// Tag type used by the fast-path constructor below: pass this when the caller
+/// already guarantees the input vector is compacted (deduplicated + zero-filtered).
+/// Lets operations like operator* skip a redundant compact() at the end.
 struct already_compacted_t {};
 inline constexpr already_compacted_t already_compacted{};
 
@@ -59,8 +59,8 @@ class QubitHamiltonian{
                 this->compact();
         }
 
-        // Fast-path constructor: skips compact(). Only use when you can prove
-        // the vector has no duplicates and no zero-coefficient terms.
+        /// Fast-path constructor: skips compact(). Only use when you can prove
+        /// the vector has no duplicates and no zero-coefficient terms.
         QubitHamiltonian(std::vector<PauliString<Coeff>>&& data, already_compacted_t){
                 this->data = std::move(data);
         }
@@ -87,8 +87,8 @@ class QubitHamiltonian{
                 return QubitHamiltonian(std::move(reduced));
         }
 
-        // Overload accepting arbitrary single-qubit amplitudes (a, b) for each
-        // traced qubit (general superposition states).
+        /// Overload accepting arbitrary single-qubit amplitudes (a, b) for each
+        /// traced qubit (general superposition states).
         QubitHamiltonian trace_out_qubits(
                 const std::vector<int>& qubits,
                 const std::vector<std::pair<std::complex<double>, std::complex<double>>>& states
@@ -196,9 +196,9 @@ class QubitHamiltonian{
                 return true;
         }
 
-        // True if this Hamiltonian has a term acting as the given Pauli operator.
-        // Matches on the operator part (x, y) only and ignores the coefficient --
-        // the same notion of term identity used by compact() and operator==.
+        /// True if this Hamiltonian has a term acting as the given Pauli operator.
+        /// Matches on the operator part (x, y) only and ignores the coefficient --
+        /// the same notion of term identity used by compact() and operator==.
         bool contains(const PauliString<Coeff>& ps) const {
                 for (const auto& term : this->data) {
                         if (term.x == ps.x && term.y == ps.y) {
@@ -208,14 +208,14 @@ class QubitHamiltonian{
                 return false;
         }
 
-        // Coefficient of a single target Pauli operator in the commutator
-        // [this, other], computed as a hash-join instead of the full O(|A||B|)
-        // pair scan (PauliEngine Features, "targeted commutators"). For a fixed
-        // term P and target R there is exactly one operator Q that can produce R,
-        // namely v(Q) = v(P) XOR v(R) (equivalently Q ∝ P·R). We hash one side by
-        // its operator signature and, for each term of the other side, look up the
-        // unique matching partner, accumulating the commutator coefficient of the
-        // target. Cost O(min(|A|,|B|)) lookups after building the map.
+        /// Coefficient of a single target Pauli operator in the commutator
+        /// [this, other], computed as a hash-join instead of the full O(|A||B|)
+        /// pair scan (PauliEngine Features, "targeted commutators"). For a fixed
+        /// term P and target R there is exactly one operator Q that can produce R,
+        /// namely v(Q) = v(P) XOR v(R) (equivalently Q ∝ P·R). We hash one side by
+        /// its operator signature and, for each term of the other side, look up the
+        /// unique matching partner, accumulating the commutator coefficient of the
+        /// target. Cost O(min(|A|,|B|)) lookups after building the map.
         Coeff targeted_commutator(const QubitHamiltonian& other,
                                   const PauliString<Coeff>& target) const {
                 using Map = std::unordered_map<PauliString<Coeff>, const PauliString<Coeff>*,
@@ -363,13 +363,13 @@ class QubitHamiltonian{
                 }
         }
 
-        // Largest word count handled by the small-key fast path (8 words =
-        // 512 qubits). Beyond this, compact() falls back to the generic sort.
+        /// Largest word count handled by the small-key fast path (8 words =
+        /// 512 qubits). Beyond this, compact() falls back to the generic sort.
         static constexpr size_t kMaxSmallKeyWords = 8;
 
-        // Compile-time dispatch: picks the smallest W in {1, 2, 4, ...,
-        // kMaxSmallKeyWords} that fits max_words and runs compact_small_key<W>.
-        // Returns false when max_words exceeds the fast-path limit.
+        /// Compile-time dispatch: picks the smallest W in {1, 2, 4, ...,
+        /// kMaxSmallKeyWords} that fits max_words and runs compact_small_key<W>.
+        /// Returns false when max_words exceeds the fast-path limit.
         template<size_t W = 1>
         bool try_compact_small_key(size_t max_words) {
                 if constexpr (W > kMaxSmallKeyWords) {
@@ -437,8 +437,8 @@ class QubitHamiltonian{
                 data = std::move(out);
         }
 
-        // Chunked parallel merge sort; falls back to std::sort without OpenMP
-        // or for small inputs. Elements must be safe to move across threads.
+        /// Chunked parallel merge sort; falls back to std::sort without OpenMP
+        /// or for small inputs. Elements must be safe to move across threads.
         template<typename T, typename Cmp>
         static void parallel_sort_vec(std::vector<T>& v, Cmp cmp) {
 #ifdef PAULIENGINE_HAS_OPENMP
