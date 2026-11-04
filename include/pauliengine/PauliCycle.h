@@ -115,6 +115,41 @@ class PauliCycle {
                                 && cmp_words(unified_y_, other.unified_y_, nwords) == 0;
                 }
 
+                /// Period d of the base: the smallest d > 0 with R^d P = P, i.e. the
+                /// number of distinct rotations (d divides n_qubits). The sum over all
+                /// n rotations counts each distinct one n/d times. Computed in
+                /// O(n/64 + w) from the cyclic (gap, Pauli) sequence: if that sequence
+                /// consists of r repetitions of a block, then d = n / r.
+                int period() const {
+                        const std::vector<int> pos = support(Base);
+                        const size_t w = pos.size();
+                        if (w == 0) {
+                                return 1;                       // the identity is invariant
+                        }
+                        std::vector<uint64_t> items(w);
+                        for (size_t i = 0; i < w; ++i) {
+                                const int gap = (i + 1 < w ? pos[i + 1] : pos[0] + n_qubits) - pos[i];
+                                const uint64_t pauli = (bit_at(Base.x, pos[i]) ? 1ULL : 0ULL)
+                                        | (bit_at(Base.y, pos[i]) ? 2ULL : 0ULL);
+                                items[i] = (static_cast<uint64_t>(gap) << 2) | pauli;
+                        }
+                        // smallest block length via the prefix function (KMP)
+                        std::vector<size_t> pi(w, 0);
+                        for (size_t i = 1; i < w; ++i) {
+                                size_t k = pi[i - 1];
+                                while (k > 0 && items[i] != items[k]) {
+                                        k = pi[k - 1];
+                                }
+                                if (items[i] == items[k]) {
+                                        ++k;
+                                }
+                                pi[i] = k;
+                        }
+                        const size_t block = w - pi[w - 1];
+                        const size_t repetitions = (w % block == 0) ? w / block : 1;
+                        return n_qubits / static_cast<int>(repetitions);
+                }
+
                 /// Negation of operator==.
                 bool operator!=(const PauliCycle& other) const {
                         return !(*this == other);
@@ -167,8 +202,8 @@ class PauliCycle {
 
                 /// Product C(P) C(Q) = sum_{b=0}^{n-1} C(P R^b Q), as a PauliCycleSum.
                 /// Products that are rotations of each other are merged.
-                PauliCycleSum multiply(const PauliCycle& other) const {
-                        require_same_n_qubits(other, "multiply");
+                PauliCycleSum operator*(const PauliCycle& other) const {
+                        require_same_n_qubits(other, "operator*");
                         const int n = this->n_qubits;
                         std::vector<PauliCycle> result;
                         result.reserve(n);
@@ -278,7 +313,7 @@ class PauliCycle {
                 /// Lazily-computed unified representative, cached so repeated ==/hash
                 /// on the same cycle don't recompute it. Depends only on Base's operator
                 /// part (x, y), which is set at construction and never mutated
-                /// afterwards (multiply only touches the coefficient); unify() keeps it
+                /// afterwards (operator* only touches the coefficient); unify() keeps it
                 /// consistent.
                 mutable bool unified_valid_ = false;
                 mutable WordVec unified_x_;
@@ -482,6 +517,12 @@ inline PauliCycleSum::PauliCycleSum(std::vector<PauliCycle> cycles) {
                 data.end());
 }
 
+inline void PauliCycleSum::unify() {
+        for (auto& c : data) {
+                c.unify();
+        }
+}
+
 inline PauliCycleSum::Coeff PauliCycleSum::contains(const PauliCycle& cycle) const {
         // The sum is merged, so at most one summand lies in the cycle's orbit.
         for (const auto& c : data) {
@@ -507,12 +548,12 @@ inline PauliCycleSum PauliCycleSum::commutator(const PauliCycleSum& other) const
         return PauliCycleSum(std::move(combined));
 }
 
-inline PauliCycleSum PauliCycleSum::multiply(const PauliCycleSum& other) const {
+inline PauliCycleSum PauliCycleSum::operator*(const PauliCycleSum& other) const {
         // ( sum_i c_i )( sum_j d_j ) = sum_{i,j} c_i d_j, merged across all pairs.
         std::vector<PauliCycle> combined;
         for (const auto& ci : data) {
                 for (const auto& dj : other.data) {
-                        PauliCycleSum part = ci.multiply(dj);
+                        PauliCycleSum part = ci * dj;
                         combined.insert(combined.end(),
                                 std::make_move_iterator(part.data.begin()),
                                 std::make_move_iterator(part.data.end()));

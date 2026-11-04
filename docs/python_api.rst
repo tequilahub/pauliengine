@@ -21,7 +21,7 @@ Qubit Hamiltonians
 ------------------
 
 .. autoclass:: pauliengine.qubit_hamiltonian.QubitHamiltonianFactory
-   :members: __call__, from_openfermion, to_openfermion, zero, unit
+   :members: __call__, from_matrix, from_openfermion, to_openfermion, zero, unit
 
 .. autofunction:: pauliengine.from_openfermion
 
@@ -45,3 +45,8 @@ Pauli orbits
 .. autoclass:: pauliengine.PauliOrbit
 
 .. autoclass:: pauliengine.PauliOrbitSum
+
+Functions
+---------
+
+.. autofunction:: pauliengine.inner_product

@@ -39,11 +39,16 @@ class PauliCycleSum {
                 PauliCycleSum commutator(const PauliCycleSum& other) const;
 
                 /// Product this * other = sum_{i,j} c_i d_j, merged.
-                PauliCycleSum multiply(const PauliCycleSum& other) const;
+                PauliCycleSum operator*(const PauliCycleSum& other) const;
 
                 /// Coefficient of `target`'s orbit in [this, other], without building
                 /// the full commutator.
                 Coeff targeted_commutator(const PauliCycleSum& other, const PauliCycle& target) const;
+
+                /// Rewrite every summand's base to the unified representative of its
+                /// orbit (in place). Cheap: the unified forms are already cached by the
+                /// merging in the constructor.
+                void unify();
 
                 /// Number of summands.
                 size_t size() const { return data.size(); }

@@ -11,6 +11,7 @@ because the orbit coefficients are rationals such as 1/12.
 from itertools import permutations
 
 import pytest
+import operator
 
 import pauliengine as pe
 
@@ -165,7 +166,7 @@ class TestMultiply:
     def test_orbit_multiply_matches_expanded(self, n, a, b):
         oa, ob = pe.PauliOrbit(n, *a), pe.PauliOrbit(n, *b)
         reference = orbit_to_qh(n, *a) * orbit_to_qh(n, *b)
-        assert qh_close(orbitsum_to_qh(oa.multiply(ob)), reference)
+        assert qh_close(orbitsum_to_qh(oa * ob), reference)
         assert qh_close(orbitsum_to_qh(oa * ob), reference)  # __mul__ agrees
 
     def test_orbit_sum_multiply_matches_expanded(self):
@@ -177,7 +178,7 @@ class TestMultiply:
         b.add(pe.PauliOrbit(n, 0, 0, 1), 0.5)
         b.add(pe.PauliOrbit(n, 1, 1, 0), 1.0)
         reference = orbitsum_to_qh(a) * orbitsum_to_qh(b)
-        assert qh_close(orbitsum_to_qh(a.multiply(b)), reference)
+        assert qh_close(orbitsum_to_qh(a * b), reference)
 
 
 # Input validation and invariants
@@ -204,10 +205,10 @@ class TestValidation:
         assert len(s) > 0
         assert all(cmath.isfinite(complex(c)) for c in s.coeffs)
 
-    @pytest.mark.parametrize("op", ["commutator", "multiply"])
+    @pytest.mark.parametrize("op", [lambda a, b: a.commutator(b), operator.mul], ids=["commutator", "mul"])
     def test_n_qubits_mismatch_raises(self, op):
         with pytest.raises(ValueError):
-            getattr(pe.PauliOrbit(3, 1, 0, 0), op)(pe.PauliOrbit(4, 0, 1, 0))
+            op(pe.PauliOrbit(3, 1, 0, 0), pe.PauliOrbit(4, 0, 1, 0))
 
     def test_targeted_n_qubits_mismatch_raises(self):
         with pytest.raises(ValueError):
@@ -274,3 +275,28 @@ class TestHash:
     def test_from_hash_invalid(self, key):
         with pytest.raises(ValueError):
             pe.PauliOrbit.from_hash(key)
+
+
+class TestTargetedBothRoutes:
+    """targeted_commutator picks the cheaper of two exact routes (splitting the target
+    vs. enumerating the operands' overlap tables); both must reproduce the full bracket."""
+
+    @pytest.mark.parametrize(
+        "n, a, b",
+        [
+            (10, (3, 3, 2), (2, 3, 3)),   # heavy operands -> light targets use the split route
+            (12, (4, 2, 3), (3, 4, 2)),
+            (8, (1, 0, 0), (0, 1, 1)),    # light operands -> table route
+            (9, (2, 2, 2), (1, 1, 0)),
+            (7, (0, 3, 2), (2, 0, 3)),
+        ],
+    )
+    def test_matches_full_commutator_for_every_label(self, n, a, b):
+        oa, ob = pe.PauliOrbit(n, *a), pe.PauliOrbit(n, *b)
+        full = {(o.p, o.q, o.r): complex(c) for o, c in zip(oa.commutator(ob).data, oa.commutator(ob).coeffs)}
+        scale = max((abs(c) for c in full.values()), default=1.0)
+        for p in range(n + 1):
+            for q in range(n + 1 - p):
+                for r in range(n + 1 - p - q):
+                    got = oa.targeted_commutator(ob, pe.PauliOrbit(n, p, q, r))
+                    assert got == pytest.approx(full.get((p, q, r), 0j), abs=1e-12 * scale)

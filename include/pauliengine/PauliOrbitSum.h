@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "pauliengine/QubitHamiltonian.h"
+
 class PauliOrbit;
 
 /// A scalar-weighted sum of Pauli orbits, sum_i coeffs[i] * data[i]
@@ -12,7 +14,7 @@ class PauliOrbit;
 ///
 /// Coefficients are complex: commutators of the (anti-Hermitian) orbits have real
 /// structure constants, but ordinary products carry a full complex Pauli phase
-/// (see PauliOrbit::multiply), so both are representable here.
+/// (see PauliOrbit::operator*), so both are representable here.
 class PauliOrbitSum {
         public:
                 using Coeff = std::complex<double>;
@@ -40,11 +42,14 @@ class PauliOrbitSum {
 
 
                 /// Product this * other = sum_{i,j} a_i b_j B_i B_j.
-                PauliOrbitSum multiply(const PauliOrbitSum& other) const;
+                PauliOrbitSum operator*(const PauliOrbitSum& other) const;
 
 
                 /// Coefficient of `target` in [this, other], without building the full commutator.
                 Coeff targeted_commutator(const PauliOrbitSum& other, const PauliOrbit& target) const;
+
+                /// The sum expanded into an explicit QubitHamiltonian (defined in PauliOrbit.h).
+                QubitHamiltonian<Coeff> to_qubit_hamiltonian() const;
 
                 /// Number of terms.
                 size_t size() const { return data.size(); }

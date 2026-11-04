@@ -8,6 +8,7 @@ same operator as forming the commutator directly on the cycle level
 """
 
 import pytest
+import operator
 
 import pauliengine as pe
 
@@ -258,8 +259,7 @@ class TestMultiply:
         a = pe.PauliCycle(n, base_a)
         b = pe.PauliCycle(n, base_b)
         reference = reference_hamiltonian(base_a) * reference_hamiltonian(base_b)
-        assert a.multiply(b).to_qubit_hamiltonian() == reference
-        assert (a * b).to_qubit_hamiltonian() == reference  # __mul__ agrees
+        assert (a * b).to_qubit_hamiltonian() == reference
 
     def test_matches_with_coefficients(self):
         base_a, base_b = "XYZI", "ZIXI"
@@ -268,13 +268,13 @@ class TestMultiply:
         a = pe.PauliCycle(n, base_a, alpha)
         b = pe.PauliCycle(n, base_b, beta)
         reference = reference_hamiltonian(base_a, alpha) * reference_hamiltonian(base_b, beta)
-        assert a.multiply(b).to_qubit_hamiltonian() == reference
+        assert (a * b).to_qubit_hamiltonian() == reference
 
     def test_result_is_deduplicated_with_merged_coeffs(self):
         # "XII" * "XII" on n=3: two of the three products fall into the same
         # rotation orbit and must be merged into one cycle with summed coeff.
         a = pe.PauliCycle(3, "XII")
-        s = a.multiply(a)
+        s = a * a
         # No two summands share a rotation orbit.
         for i in range(len(s.data)):
             for j in range(i + 1, len(s.data)):
@@ -304,8 +304,7 @@ class TestCycleSumAlgebra:
         s1 = self._sum(n, ["XYZI", "ZIXI"])
         s2 = self._sum(n, ["XXYZ", "IZYX"])
         h1, h2 = s1.to_qubit_hamiltonian(), s2.to_qubit_hamiltonian()
-        assert s1.multiply(s2).to_qubit_hamiltonian() == h1 * h2
-        assert (s1 * s2).to_qubit_hamiltonian() == h1 * h2  # __mul__ agrees
+        assert (s1 * s2).to_qubit_hamiltonian() == h1 * h2
 
 
 # Unified representative: equality / hashing across rotations
@@ -385,11 +384,11 @@ class TestValidation:
         # Trailing identities carry no support, so they are not out of range.
         assert pe.PauliCycle(3, {0: "X", 7: "I"}) == pe.PauliCycle(3, "XII")
 
-    @pytest.mark.parametrize("op", ["commutator", "multiply"])
+    @pytest.mark.parametrize("op", [lambda a, b: a.commutator(b), operator.mul], ids=["commutator", "mul"])
     def test_n_qubits_mismatch_raises(self, op):
         a, b = pe.PauliCycle(3, "XYZ"), pe.PauliCycle(4, "ZIXI")
         with pytest.raises(ValueError):
-            getattr(a, op)(b)
+            op(a, b)
 
     def test_targeted_n_qubits_mismatch_raises(self):
         a, b = pe.PauliCycle(4, "XYZI"), pe.PauliCycle(4, "ZIXI")
@@ -457,7 +456,7 @@ class TestPeriodicBases:
         a, b = pe.PauliCycle(n, base_a), pe.PauliCycle(n, base_b)
         ha, hb = reference_hamiltonian(base_a), reference_hamiltonian(base_b)
         assert a.commutator(b).to_qubit_hamiltonian() == ha.commutator(hb)
-        assert a.multiply(b).to_qubit_hamiltonian() == ha * hb
+        assert (a * b).to_qubit_hamiltonian() == ha * hb
 
     def test_targeted_on_periodic(self):
         a, b = pe.PauliCycle(4, "XIII"), pe.PauliCycle(4, "ZIZI")
@@ -518,3 +517,26 @@ class TestHash:
         with pytest.raises(ValueError):
             # string acts on qubit 5 but n_qubits = 3
             pe.PauliCycle.from_hash(pe.PauliString(1.0, {5: "X"}).get_hash() * 2**32 + 3)
+
+
+class TestSumUnify:
+    def test_unify_rewrites_bases_and_keeps_operator(self):
+        a, b = pe.PauliCycle(8, "XIZIIYII"), pe.PauliCycle(8, "IZZIIIXI")
+        for s in (a.commutator(b), a * b):
+            before = s.to_qubit_hamiltonian()
+            s.unify()
+            assert s.to_qubit_hamiltonian() == before
+            for c in s.data:
+                u = pe.PauliCycle(8, c.base)
+                u.unify()
+                assert c.base == u.base          # already the unified representative
+
+    def test_unify_is_idempotent_and_rotation_invariant(self):
+        s1 = pe.PauliCycleSum([pe.PauliCycle(6, "XYIIZI", 2.0)])
+        s2 = pe.PauliCycleSum([pe.PauliCycle(6, py_rotate("XYIIZI", 4), 2.0)])
+        s1.unify()
+        s2.unify()
+        assert s1.data[0].base == s2.data[0].base
+        first = s1.data[0].base
+        s1.unify()
+        assert s1.data[0].base == first

@@ -175,6 +175,36 @@ class QubitHamiltonianFactory:
         return _qh_to_openfermion(qh)
 
     @staticmethod
+    def from_matrix(matrix: Any, threshold: float = 0.0) -> QubitHamiltonianComplex:
+        """Decompose a 2**n x 2**n matrix into Pauli strings.
+
+        Uses the method of Georges et al. (2025), O(4**n n). Qubit 0 is the
+        most significant bit of the row and column index, matching
+        ``to_matrix(ignore_unused_qubits=False)``, so
+        ``QubitHamiltonian.from_matrix(H.to_matrix(False)) == H``.
+
+        Args:
+            matrix: A square matrix with side 2**n, as a numpy array or a list
+                of rows. It is not modified.
+            threshold: Terms with ``abs(coefficient) <= threshold`` are dropped.
+                The default 0 drops only exact zeros.
+
+        Returns:
+            The matrix as a ``QubitHamiltonianComplex``.
+
+        Raises:
+            ValueError: If the matrix is not square with a power-of-two side.
+        """
+        try:
+            import numpy as np
+        except ImportError:
+            return QubitHamiltonianComplex.from_matrix(matrix, threshold)
+        arr = np.ascontiguousarray(matrix, dtype=np.complex128)
+        if arr.ndim != 2:
+            raise ValueError(f"from_matrix: expected a 2-D matrix, got {arr.ndim} dimensions")
+        return QubitHamiltonianComplex.from_matrix(arr, threshold)
+
+    @staticmethod
     def zero() -> QubitHamiltonianComplex:
         """The zero Hamiltonian (no terms)."""
         return QubitHamiltonianComplex.zero()

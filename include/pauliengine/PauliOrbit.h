@@ -10,6 +10,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "pauliengine/PauliString.h"
+#include "pauliengine/QubitHamiltonian.h"
 #include "pauliengine/PauliOrbitSum.h"
 
 /// Permutation-invariant Pauli orbit basis (arXiv:2604.16701, Section V).
@@ -26,6 +28,10 @@ class PauliOrbit {
                 /// coefficients would silently become inf/nan, so construction is
                 /// refused instead.
                 static constexpr int kMaxQubits = 170;
+
+                /// Largest number of Pauli strings to_qubit_hamiltonian() will materialize;
+                /// beyond it the expansion would need several GB, so it throws instead.
+                static constexpr double kMaxExpandedTerms = 2.0e7;
 
                 /// Fixed at construction (exposed read-only to Python): they define
                 /// equality and the hash, so changing them would corrupt sets/dicts.
@@ -59,15 +65,15 @@ class PauliOrbit {
                         return p >= 0 && q >= 0 && r >= 0 && identities() >= 0;
                 }
 
-                // Number of distinct Pauli strings in this orbit (Eq. 52).
                 /// Number of distinct Pauli strings in the orbit, n! / (p! q! r! (n-p-q-r)!) (Eq. 52).
                 double n_terms() const {
                         const int s = identities();
                         if (p < 0 || q < 0 || r < 0 || s < 0) {
                                 return 0.0;
                         }
-                        const std::vector<double>& fact = factorial_table(n_qubits);
-                        return fact[n_qubits] / (fact[p] * fact[q] * fact[r] * fact[s]);
+                        const double fn = factorial_table(n_qubits)[n_qubits];
+                        const std::vector<double>& inv = inv_factorial_table(n_qubits);
+                        return fn * (inv[p] * inv[q] * inv[r] * inv[s]);
                 }
 
                 /// Equal iff n_qubits and the label (p, q, r) agree.
@@ -87,6 +93,58 @@ class PauliOrbit {
                         return h;
                 }
 
+
+                /// The orbit expanded into an explicit QubitHamiltonian:
+                /// (i / n_terms()) * sum of all Pauli strings with p X-, q Y- and r Z-sites.
+                /// The expansion has n_terms() strings; throws std::length_error above
+                /// kMaxExpandedTerms.
+                QubitHamiltonian<Coeff> to_qubit_hamiltonian() const {
+                        const double count = n_terms();
+                        if (count > kMaxExpandedTerms) {
+                                throw std::length_error("PauliOrbit.to_qubit_hamiltonian: the orbit has "
+                                        + std::to_string(count) + " Pauli strings (limit "
+                                        + std::to_string(kMaxExpandedTerms) + ")");
+                        }
+                        const Coeff c(0.0, 1.0 / count);
+                        std::vector<PauliString<Coeff>> terms;
+                        terms.reserve(static_cast<size_t>(count));
+                        const size_t n_words = (static_cast<size_t>(n_qubits) + BITS_IN_INTEGER - 1) / BITS_IN_INTEGER;
+                        WordVec x(n_words), y(n_words);
+                        // Depth-first over the qubits: each qubit gets I, X, Y or Z while
+                        // the remaining counts still fit, which visits every placement once.
+                        auto place = [&](auto&& self, int qubit, int cx, int cy, int cz) -> void {
+                                if (cx + cy + cz == 0) {
+                                        terms.emplace_back(x, y, c);
+                                        return;
+                                }
+                                if (cx + cy + cz > n_qubits - qubit) {
+                                        return;
+                                }
+                                const size_t w = static_cast<size_t>(qubit) / BITS_IN_INTEGER;
+                                const uint64_t bit = 1ULL << (static_cast<size_t>(qubit) % BITS_IN_INTEGER);
+                                self(self, qubit + 1, cx, cy, cz);                           // I
+                                if (cx > 0) {                                                // X
+                                        x[w] |= bit;
+                                        self(self, qubit + 1, cx - 1, cy, cz);
+                                        x[w] &= ~bit;
+                                }
+                                if (cy > 0) {                                                // Y
+                                        y[w] |= bit;
+                                        self(self, qubit + 1, cx, cy - 1, cz);
+                                        y[w] &= ~bit;
+                                }
+                                if (cz > 0) {                                                // Z
+                                        x[w] |= bit;
+                                        y[w] |= bit;
+                                        self(self, qubit + 1, cx, cy, cz - 1);
+                                        x[w] &= ~bit;
+                                        y[w] &= ~bit;
+                                }
+                        };
+                        place(place, 0, p, q, r);
+                        // all strings are distinct and non-zero, so no compaction is needed
+                        return QubitHamiltonian<Coeff>(std::move(terms), already_compacted);
+                }
 
                 /// Invertible key of the orbit label, consistent with operator==:
                 /// n * 2^24 + p * 2^16 + q * 2^8 + r (all four are <= kMaxQubits < 256).
@@ -110,11 +168,11 @@ class PauliOrbit {
                         require_same_n_qubits(other, "commutator");
                         PauliOrbitSum out(n_qubits);
                         const int n = n_qubits;
-                        const std::vector<double>& fact = factorial_table(n);
-                        const double fn = fact[n];
+                        const double fn = factorial_table(n)[n];
+                        const std::vector<double>& inv = inv_factorial_table(n);
                         const auto n_terms_of = [&](int P, int Q, int R) {
                                 const int S = n - P - Q - R;
-                                return fn / (fact[P] * fact[Q] * fact[R] * fact[S]);
+                                return fn * (inv[P] * inv[Q] * inv[R] * inv[S]);
                         };
                         const double pref = 2.0 / (n_terms_of(p, q, r)
                                 * n_terms_of(other.p, other.q, other.r));
@@ -145,15 +203,15 @@ class PauliOrbit {
 
 
                 /// Product this * other in the orbit basis (complex coefficients).
-                PauliOrbitSum multiply(const PauliOrbit& other) const {
-                        require_same_n_qubits(other, "multiply");
+                PauliOrbitSum operator*(const PauliOrbit& other) const {
+                        require_same_n_qubits(other, "operator*");
                         PauliOrbitSum out(n_qubits);
                         const int n = n_qubits;
-                        const std::vector<double>& fact = factorial_table(n);
-                        const double fn = fact[n];
+                        const double fn = factorial_table(n)[n];
+                        const std::vector<double>& inv = inv_factorial_table(n);
                         const auto n_terms_of = [&](int P, int Q, int R) {
                                 const int S = n - P - Q - R;
-                                return fn / (fact[P] * fact[Q] * fact[R] * fact[S]);
+                                return fn * (inv[P] * inv[Q] * inv[R] * inv[S]);
                         };
                         const double pref = 1.0 / (n_terms_of(p, q, r)
                                 * n_terms_of(other.p, other.q, other.r));
@@ -197,11 +255,11 @@ class PauliOrbit {
                         const int p2 = other.p, q2 = other.q, r2 = other.r, s2 = n - p2 - q2 - r2;
                         const int tp = target.p, tq = target.q, tr = target.r;
 
-                        const std::vector<double>& fact = factorial_table(n);
-                        const double fn = fact[n];
+                        const double fn = factorial_table(n)[n];
+                        const std::vector<double>& inv = inv_factorial_table(n);
                         const auto n_terms_of = [&](int P, int Q, int R) {
                                 const int S = n - P - Q - R;
-                                return fn / (fact[P] * fact[Q] * fact[R] * fact[S]);
+                                return fn * (inv[P] * inv[Q] * inv[R] * inv[S]);
                         };
                         const double pref = 2.0 / (n_terms_of(p1, q1, r1) * n_terms_of(p2, q2, r2));
 
@@ -227,50 +285,57 @@ class PauliOrbit {
                                 return Coeff(pref * acc, 0.0);
                         }
 
-                        // Split target X-count over (XI, IX, YZ, ZY).
+                        // Split route: enumerate how the target's letters arise from the
+                        // cells of the overlap table. With the three splits of the target
+                        // letters fixed, the column sums of `other` remain as constraints:
+                        // column Z determines nIZ from nZI, and column X then determines
+                        // nXY, so only seven loops remain (column I follows from the others,
+                        // since rows and columns both add up to n). The weight
+                        // n! / prod(cell!) uses the cached inverse factorials, with partial
+                        // products hoisted to the loop level where their cells are fixed.
                         for (int nXI = 0; nXI <= tp; ++nXI)
                           for (int nIX = 0; nIX <= tp - nXI; ++nIX)
                             for (int nYZ = 0; nYZ <= tp - nXI - nIX; ++nYZ) {
                               const int nZY = tp - nXI - nIX - nYZ;
-                              // Split target Y-count over (YI, IY, ZX, XZ).
+                              const double wX = inv[nXI] * inv[nIX] * inv[nYZ] * inv[nZY];
                               for (int nYI = 0; nYI <= tq; ++nYI)
                                 for (int nIY = 0; nIY <= tq - nYI; ++nIY)
                                   for (int nZX = 0; nZX <= tq - nYI - nIY; ++nZX) {
                                     const int nXZ = tq - nYI - nIY - nZX;
-                                    // Split target Z-count over (ZI, IZ, XY, YX).
-                                    for (int nZI = 0; nZI <= tr; ++nZI)
-                                      for (int nIZ = 0; nIZ <= tr - nZI; ++nIZ)
-                                        for (int nXY = 0; nXY <= tr - nZI - nIZ; ++nXY) {
-                                          const int nYX = tr - nZI - nIZ - nXY;
+                                    const double wXY = wX * inv[nYI] * inv[nIY] * inv[nZX] * inv[nXZ];
+                                    // Column Z: nXZ + nYZ + nZZ + nIZ = r2 with
+                                    // nZZ = r1 - nZX - nZY - nZI  =>  nIZ = nZI + dZ.
+                                    const int dZ = r2 - r1 - nXZ - nYZ + nZX + nZY;
+                                    for (int nZI = std::max(0, -dZ); 2 * nZI + dZ <= tr; ++nZI) {
+                                      const int nIZ = nZI + dZ;
+                                      // Column X with nXX = p1 - nXY - nXZ - nXI and
+                                      // nYX = tr - nZI - nIZ - nXY  =>  2 * nXY = num.
+                                      const int num = p1 - nXZ - nXI + tr - nZI - nIZ + nZX + nIX - p2;
+                                      if (num < 0 || (num & 1)) continue;
+                                      const int nXY = num / 2;
+                                      const int nYX = tr - nZI - nIZ - nXY;
+                                      if (nYX < 0) continue;
 
-                                          // Diagonals from the row sums.
-                                          const int nXX = p1 - nXY - nXZ - nXI;
-                                          const int nYY = q1 - nYX - nYZ - nYI;
-                                          const int nZZ = r1 - nZX - nZY - nZI;
-                                          const int nII = s1 - nIX - nIY - nIZ;
-                                          if (nXX < 0 || nYY < 0 || nZZ < 0 || nII < 0) continue;
+                                      // Diagonals from the row sums.
+                                      const int nXX = p1 - nXY - nXZ - nXI;
+                                      const int nYY = q1 - nYX - nYZ - nYI;
+                                      const int nZZ = r1 - nZX - nZY - nZI;
+                                      const int nII = s1 - nIX - nIY - nIZ;
+                                      if (nXX < 0 || nYY < 0 || nZZ < 0 || nII < 0) continue;
 
-                                          // Column sums must match `other`.
-                                          if (nXX + nYX + nZX + nIX != p2) continue;
-                                          if (nXY + nYY + nZY + nIY != q2) continue;
-                                          if (nXZ + nYZ + nZZ + nIZ != r2) continue;
-                                          if (nXI + nYI + nZI + nII != s2) continue;
+                                      // Remaining independent column constraint (Y).
+                                      if (nXY + nYY + nZY + nIY != q2) continue;
 
-                                          // Parity: only anticommuting patterns (D odd).
-                                          const int D = nXY + nXZ + nYX + nYZ + nZX + nZY;
-                                          if ((D & 1) == 0) continue;
+                                      // Parity: only anticommuting patterns (D odd).
+                                      const int D = nXY + nXZ + nYX + nYZ + nZX + nZY;
+                                      if ((D & 1) == 0) continue;
 
-                                          const double W = fn / (
-                                                  fact[nXX] * fact[nXY] * fact[nXZ] * fact[nXI] *
-                                                  fact[nYX] * fact[nYY] * fact[nYZ] * fact[nYI] *
-                                                  fact[nZX] * fact[nZY] * fact[nZZ] * fact[nZI] *
-                                                  fact[nIX] * fact[nIY] * fact[nIZ] * fact[nII]);
-
-                                          const int E = nYX + nZY + nXZ;
-                                          const int expo = E + (D - 1) / 2 + 1;
-                                          const double sgn = (expo & 1) ? -1.0 : 1.0;
-                                          acc += sgn * W;
-                                        }
+                                      const double W = fn * (wXY * inv[nZI] * inv[nIZ] * inv[nXY] * inv[nYX]
+                                              * inv[nXX] * inv[nYY] * inv[nZZ] * inv[nII]);
+                                      const int E = nYX + nZY + nXZ;
+                                      const int expo = E + (D - 1) / 2 + 1;
+                                      acc += (expo & 1) ? -W : W;
+                                    }
                                   }
                             }
 
@@ -313,9 +378,11 @@ class PauliOrbit {
                         const double fn_n = factorial_table(n)[n];
                         const std::vector<double>& inv = inv_factorial_table(n);
 
-                        // W = n! / prod(cell!) is built from inverse factorials, with
-                        // the X- and Y-row factors hoisted out of the inner loops. All
-                        // partial products are >= 1/n! >= 1/170!, so nothing underflows.
+                        // W = n! / prod(cell!) is built from cached inverse factorials,
+                        // each factor hoisted to the loop level where its cell is fixed
+                        // (X row, Y row, then ZX/IX and ZY/IY), so the innermost loop does
+                        // four multiplications. Every partial product is >= 1/n! >= 1/170!,
+                        // so nothing underflows.
                         for (int nXX = std::max(0, p1 - (n - p2)); nXX <= std::min(p1, p2); ++nXX) {
                           const int rX1 = p1 - nXX;
                           for (int nXY = std::max(0, rX1 - (n - q2)); nXY <= std::min(rX1, q2); ++nXY) {
@@ -338,12 +405,14 @@ class PauliOrbit {
 
                                     for (int nZX = std::max(0, r1 - (dq2 + dr2 + ds2)); nZX <= std::min(r1, dp2); ++nZX) {
                                       const int rZ1 = r1 - nZX;
+                                      const int nIX = dp2 - nZX;
+                                      const double rowXY_X = rowXY * inv[nZX] * inv[nIX];
                                       for (int nZY = std::max(0, rZ1 - (dr2 + ds2)); nZY <= std::min(rZ1, dq2); ++nZY) {
                                         const int rZ2 = rZ1 - nZY;
+                                        const int nIY = dq2 - nZY;
+                                        const double rowXY_XY = rowXY_X * inv[nZY] * inv[nIY];
                                         for (int nZZ = std::max(0, rZ2 - ds2); nZZ <= std::min(rZ2, dr2); ++nZZ) {
                                           const int nZI = rZ2 - nZZ;
-                                          const int nIX = dp2 - nZX;
-                                          const int nIY = dq2 - nZY;
                                           const int nIZ = dr2 - nZZ;
                                           const int nII = ds2 - nZI;
 
@@ -351,9 +420,8 @@ class PauliOrbit {
                                           const int pt = nXI + nIX + nYZ + nZY;
                                           const int qt = nYI + nIY + nZX + nXZ;
                                           const int rt = nZI + nIZ + nXY + nYX;
-                                          const double W = fn_n * (rowXY
-                                                  * inv[nZX] * inv[nZY] * inv[nZZ] * inv[nZI]
-                                                  * inv[nIX] * inv[nIY] * inv[nIZ] * inv[nII]);
+                                          const double W = fn_n * (rowXY_XY
+                                                  * inv[nZZ] * inv[nZI] * inv[nIZ] * inv[nII]);
                                           const int E = nYX + nZY + nXZ;
                                           fn(pt, qt, rt, E, D, W);
                                         }
@@ -454,12 +522,12 @@ inline PauliOrbitSum PauliOrbitSum::commutator(const PauliOrbitSum& other) const
         return result;
 }
 
-inline PauliOrbitSum PauliOrbitSum::multiply(const PauliOrbitSum& other) const {
+inline PauliOrbitSum PauliOrbitSum::operator*(const PauliOrbitSum& other) const {
         // ( sum_i a_i B_i )( sum_j b_j B_j ) = sum_{i,j} a_i b_j B_i B_j.
         PauliOrbitSum result(n_qubits);
         for (size_t i = 0; i < data.size(); ++i) {
                 for (size_t j = 0; j < other.data.size(); ++j) {
-                        const PauliOrbitSum part = data[i].multiply(other.data[j]);
+                        const PauliOrbitSum part = data[i] * other.data[j];
                         const Coeff scale = coeffs[i] * other.coeffs[j];
                         for (size_t k = 0; k < part.data.size(); ++k) {
                                 result.add(part.data[k], scale * part.coeffs[k]);
@@ -480,6 +548,19 @@ inline PauliOrbitSum::Coeff PauliOrbitSum::targeted_commutator(const PauliOrbitS
                 }
         }
         return total;
+}
+
+inline QubitHamiltonian<PauliOrbitSum::Coeff> PauliOrbitSum::to_qubit_hamiltonian() const {
+        std::vector<PauliString<Coeff>> terms;
+        for (size_t k = 0; k < data.size(); ++k) {
+                QubitHamiltonian<Coeff> part = data[k].to_qubit_hamiltonian();
+                for (auto& ps : part.data) {
+                        ps.coeff *= coeffs[k];
+                        terms.push_back(std::move(ps));
+                }
+        }
+        // different labels never share a string; the constructor only drops zeros
+        return QubitHamiltonian<Coeff>(std::move(terms));
 }
 
 inline void PauliOrbitSum::prune_zeros() {

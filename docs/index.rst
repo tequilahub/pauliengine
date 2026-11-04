@@ -6,6 +6,11 @@ frontend for Pauli strings, qubit Hamiltonians and symmetry-adapted operator
 bases (Pauli cycles and Pauli orbits). Coefficients can be numeric
 (``std::complex<double>``) or fully symbolic (SymEngine).
 
+- Products, commutators and targeted commutators in the binary symplectic
+  representation, also directly in the cycle and orbit bases.
+- Arithmetic and Hilbert-Schmidt inner products between all representations.
+- Pauli decomposition of arbitrary :math:`2^n \times 2^n` matrices.
+
 See `arXiv:2601.02233 <https://arxiv.org/abs/2601.02233>`_ for the algorithmic
 background and `arXiv:2604.16701 <https://arxiv.org/abs/2604.16701>`_ for the
 cycle and orbit bases.

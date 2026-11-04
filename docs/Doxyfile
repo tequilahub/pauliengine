@@ -20,6 +20,8 @@ XML_PROGRAMLISTING     = NO
 EXTRACT_ALL            = YES
 EXTRACT_PRIVATE        = NO
 EXTRACT_STATIC         = YES
+# implementation helpers are not part of the user documentation
+EXCLUDE_SYMBOLS        = pauliengine_detail
 HIDE_UNDOC_RELATIONS   = YES
 
 # `///` blocks: the first sentence becomes the brief description.
