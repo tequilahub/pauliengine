@@ -303,19 +303,30 @@ def test_pauli_string_map_qubits_chain():
 
 
 def test_pauli_string_qubits():
-    ps = pe.PauliString(1.0, {0: "X", 2: "Z"})
-    qs = ps.qubits()
-    assert 0 in qs
-    assert 2 in qs
+    assert pe.PauliString(1.0, {0: "X", 2: "Z"}).qubits() == [0, 2]
+
+
+@pytest.mark.parametrize(
+    "ops",
+    [{}, {3: "X", 5: "Z"}, {1: "Y"}, {0: "X", 63: "Y", 64: "Z", 130: "X"}],
+)
+def test_pauli_string_qubits_exact(ops):
+    # exactly the non-identity qubits, sorted, nothing else
+    assert pe.PauliString(1.0, ops).qubits() == sorted(ops)
+    assert pe.PauliString("a", ops).qubits() == sorted(ops)
 
 
 def test_pauli_string_openfermion_format():
     ps = pe.PauliString(1.0, {0: "X", 1: "Z"})
-    of_format = ps.key_openfermion()
-    assert isinstance(of_format, list)
-    qubit_indices = [pair[1] for pair in of_format]
-    assert 0 in qubit_indices
-    assert 1 in qubit_indices
+    assert ps.key_openfermion() == [("X", 0), ("Z", 1)]
+
+
+def test_pauli_string_openfermion_format_exact():
+    ops = {2: "Y", 5: "X", 70: "Z"}
+    expected = [("Y", 2), ("X", 5), ("Z", 70)]
+    assert pe.PauliString(1.0, ops).key_openfermion() == expected
+    assert pe.PauliString("a", ops).key_openfermion() == expected
+    assert pe.PauliString(1.0, {}).key_openfermion() == []
 
 
 def test_pauli_string_space_separated_string_constructor():
@@ -330,6 +341,22 @@ def test_pauli_string_default_constructor():
     ps = _core.PauliStringComplex()
     assert ps.coeff == 0j
     assert ps.is_zero
+
+
+def test_is_zero_reflects_coefficient():
+    assert not pe.PauliString(2.0, {0: "X"}).is_zero
+    assert pe.PauliString(0.0, {0: "X"}).is_zero
+    assert not pe.PauliString("a", {0: "X"}).is_zero
+    assert pe.PauliString("a - a", {0: "X"}).is_zero
+    ps = pe.PauliString(1.0, {0: "X"})
+    assert ps.commutator(pe.PauliString(1.0, {1: "Z"})).is_zero  # commuting -> zero
+
+
+def test_mixed_rmul_overloads_are_callable():
+    c, s = pe.PauliString(2.0, {0: "X"}), pe.PauliString("a", {0: "Y"})
+    # other * self, explicitly via __rmul__, matches the forward product
+    assert c.__rmul__(s) == s * c
+    assert s.__rmul__(c) == c * s
 
 
 # --- PauliStringSymbolic ---
@@ -670,6 +697,27 @@ class TestPauliStringSubs:
         ps = pe.PauliString("b*a**2", {1: "Z"})
         d = ps.diff("a").subs({"a": 3.0 + 0j, "b": 2.0 + 0j})
         assert _core.PauliStringSymbolic.to_complex(d.get_coeff()) == pytest.approx(12.0 + 0j)
+
+
+class TestTargetedCommutator:
+    def test_matches_full_commutator(self):
+        a = pe.PauliString(1.0, {0: "X", 1: "Y"})
+        b = pe.PauliString(2.0, {0: "Z"})
+        full = a.commutator(b)
+        coeff, ops = full.to_dictionary()
+        target = pe.PauliString(1.0, dict(ops))
+        assert a.targeted_commutator(b, target) == pytest.approx(complex(coeff))
+
+    def test_non_matching_target_is_zero(self):
+        a = pe.PauliString(1.0, {0: "X", 1: "Y"})
+        b = pe.PauliString(1.0, {0: "Z"})
+        # [X0 Y1, Z0] acts on qubits 0,1; a different operator has coefficient 0.
+        assert a.targeted_commutator(b, pe.PauliString(1.0, {0: "X"})) == pytest.approx(0j)
+
+    def test_commuting_pair_is_zero(self):
+        a = pe.PauliString(1.0, {0: "X"})
+        b = pe.PauliString(1.0, {1: "Z"})  # disjoint support -> commute
+        assert a.targeted_commutator(b, pe.PauliString(1.0, {0: "X", 1: "Z"})) == pytest.approx(0j)
 
 
 class TestHash:

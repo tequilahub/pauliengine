@@ -7,10 +7,11 @@ or an ad-hoc script.
 from __future__ import annotations
 
 import gc
-import math
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
+
+from scipy.stats import gmean, gstd
 
 from . import generate
 
@@ -27,9 +28,7 @@ class Measurement:
     n_terms: int
     n_qubits: int
     repeats: int
-    time_min: float
-    time_mean: float
-    time_stdev: float
+    times: list[float]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,23 +38,60 @@ class Measurement:
             "n_terms": self.n_terms,
             "n_qubits": self.n_qubits,
             "repeats": self.repeats,
-            "time_min_s": self.time_min,
-            "time_mean_s": self.time_mean,
-            "time_stdev_s": self.time_stdev,
+            "times_s": self.times,
         }
 
 
-def _stdev(samples: list[float], mean: float) -> float:
-    if len(samples) < 2:
-        return 0.0
-    var = sum((x - mean) ** 2 for x in samples) / (len(samples) - 1)
-    return math.sqrt(var)
+def _geo_stats(samples: list[float]) -> tuple[float, float]:
+    """Geometric mean and an absolute spread from the geometric standard deviation.
+
+    Runtimes are positive and right-skewed (occasional slow samples, never a
+    negative one), so the geometric mean is a more robust central value than the
+    arithmetic mean and the geometric standard deviation (``scipy.stats.gstd``, a
+    dimensionless multiplicative factor >= 1) the natural measure of spread. We
+    return the spread as ``gmean * (gstd - 1)`` so it stays an absolute quantity
+    in seconds, compatible with the additive error bars the plots draw.
+    """
+    safe = [s if s > 0 else 1e-12 for s in samples]  # gmean/gstd need positives
+    g = float(gmean(safe))
+    if len(safe) < 2:
+        return g, 0.0
+    spread = g * (float(gstd(safe)) - 1.0)
+    return g, spread
 
 
-def _time_call(fn: Callable[[], Any], repeats: int, warmup: int) -> tuple[float, float, float]:
+def summarize(samples: list[float]) -> tuple[float, float, float]:
+    """``(min, gmean, spread)`` in seconds of raw timing samples (see ``_geo_stats``)."""
+    g, spread = _geo_stats(samples)
+    return min(samples), g, spread
+
+
+def route_stats(m: dict[str, Any], key: str = "") -> tuple[float, float]:
+    """``(gmean, spread)`` of one route in a stored measurement dict.
+
+    Result files store the raw samples as ``<key>_times_s`` (or ``times_s`` for
+    ``key=""``); the statistics are derived here, at analysis time. Older files
+    (schema_version 1) only carry the precomputed ``<key>_time_mean_s`` /
+    ``<key>_time_stdev_s`` and are read as-is.
+    """
+    prefix = f"{key}_" if key else ""
+    samples = m.get(f"{prefix}times_s")
+    if samples is not None:
+        _, g, spread = summarize(samples)
+        return g, spread
+    return m[f"{prefix}time_mean_s"], m.get(f"{prefix}time_stdev_s", 0.0)
+
+
+def has_route(measurements: list[dict[str, Any]], key: str) -> bool:
+    """Whether any measurement carries timings for route ``key`` (new or old schema)."""
+    return any(f"{key}_times_s" in m or f"{key}_time_mean_s" in m for m in measurements)
+
+
+def _time_call(fn: Callable[[], Any], repeats: int, warmup: int) -> list[float]:
     """Run ``fn`` ``warmup`` times to warm caches, then ``repeats`` measured runs.
 
-    Returns ``(min, mean, stdev)`` in seconds.
+    Returns every measured sample in seconds, in run order. Statistics are left to
+    the analysis side (``summarize`` / ``route_stats``) so no information is lost.
     """
     for _ in range(warmup):
         fn()
@@ -69,8 +105,7 @@ def _time_call(fn: Callable[[], Any], repeats: int, warmup: int) -> tuple[float,
             samples.append(time.perf_counter() - t0)
     finally:
         gc.enable()
-    mean = sum(samples) / len(samples)
-    return min(samples), mean, _stdev(samples, mean)
+    return samples
 
 
 def _make_op(op: Operation, h1, h2) -> Callable[[], Any]:
@@ -95,7 +130,6 @@ def measure_point(
     h1 = generate.random_hamiltonian(n_terms, n_qubits, coeff_kind, seed=seed)
     h2 = generate.random_hamiltonian(n_terms, n_qubits, coeff_kind, seed=seed + 1)
     fn = _make_op(op, h1, h2)
-    t_min, t_mean, t_std = _time_call(fn, repeats=repeats, warmup=warmup)
     return Measurement(
         op=op,
         coeff_kind=coeff_kind,
@@ -103,9 +137,7 @@ def measure_point(
         n_terms=n_terms,
         n_qubits=n_qubits,
         repeats=repeats,
-        time_min=t_min,
-        time_mean=t_mean,
-        time_stdev=t_std,
+        times=_time_call(fn, repeats=repeats, warmup=warmup),
     )
 
 

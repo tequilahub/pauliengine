@@ -1,0 +1,105 @@
+Quickstart
+==========
+
+Pauli strings
+-------------
+
+``pe.PauliString`` accepts several input shapes. The coefficient type selects
+the backend: a number gives a numeric string, a string gives a symbolic one.
+
+.. code-block:: python
+
+   import pauliengine as pe
+
+   pe.PauliString(1.0, {0: "Z", 1: "X"})         # dict input
+   pe.PauliString(1.0, "X0 Y1 Z2")               # space-separated string input
+   pe.PauliString((1.0, [("X", 0), ("Y", 2)]))   # OpenFermion-style (coeff, list)
+   pe.PauliString("a", {0: "X"})                 # symbolic coefficient
+
+Products carry the correct phases of the Pauli algebra:
+
+.. code-block:: python
+
+   pe.PauliString(1.0, {0: "X"}) * pe.PauliString(1.0, {0: "Y"})   # 1j * Z(0)
+
+Hamiltonians
+------------
+
+.. code-block:: python
+
+   H = pe.QubitHamiltonian([(1.0, {0: "X"}), ("a", {1: "Z"})])
+
+   H1 = 0.5 * H + (-H) * 2j
+   H3 = H ** 3
+   C = H.commutator(H1)
+
+   H.qubits()          # sorted list of qubits with non-identity operators
+   H.is_hermitian()
+   H.dagger()
+
+Every operation that returns a Hamiltonian merges terms with the same operator
+and drops zero coefficients, so no explicit ``simplify()`` is needed.
+
+Looking up and hashing terms
+----------------------------
+
+``QubitHamiltonian.contains`` returns the coefficient of a Pauli string (``0``
+if it does not occur) and accepts the same formats as the constructors:
+
+.. code-block:: python
+
+   H.contains({0: "X"})          # dict
+   H.contains([("X", 0)])        # OpenFermion-style list
+   H.contains("XI")              # dense string, character i acts on qubit i
+   H.contains("X0")              # sparse string
+
+``PauliString.get_hash()`` is an invertible integer key of the operator part
+(the coefficient is ignored), and ``PauliString.from_hash`` rebuilds the string:
+
+.. code-block:: python
+
+   key = pe.PauliString(2.0, {0: "X", 2: "Z"}).get_hash()   # 1 + 3 * 4**2 = 49
+   pe.PauliString.from_hash(key, 0.5)
+
+Inner products
+--------------
+
+``inner_product`` is the Hilbert-Schmidt inner product normalized so that Pauli
+strings are orthonormal, :math:`\mathrm{Tr}(A^\dagger B)/2^n`. It is
+conjugate-linear in the first argument:
+
+.. code-block:: python
+
+   p = pe.PauliString(2.0, {0: "X"})
+   H2 = pe.QubitHamiltonian([(1.0, {0: "X"}), (3.0, {1: "Z"})])
+   p.inner_product(H2)             # conj(2.0) * 1.0 = 2.0
+   pe.inner_product(H2, H2)        # 1 + 9 = 10
+
+See :doc:`symmetry` for inner products with cycles and orbits.
+
+From a matrix
+-------------
+
+``QubitHamiltonian.from_matrix`` decomposes any :math:`2^n \times 2^n` matrix
+into Pauli strings in :math:`O(4^n n)` (method of Georges et al., 2025). Qubit 0
+is the most significant bit of the row and column index, as in ``to_matrix``:
+
+.. code-block:: python
+
+   M = [[0, 1], [2, 3]]
+   pe.QubitHamiltonian.from_matrix(M)       # 1.5 I + 1.5 X - 0.5i Y - 1.5 Z
+
+   H3 = pe.QubitHamiltonian([(0.5, {0: "X", 1: "Z"})])
+   pe.QubitHamiltonian.from_matrix(H3.to_matrix(ignore_unused_qubits=False)) == H3
+
+The input may be a numpy array or a list of rows; it is not modified. Terms with
+``abs(coefficient) <= threshold`` can be dropped with the ``threshold`` argument.
+
+Symbolic coefficients
+---------------------
+
+.. code-block:: python
+
+   H = pe.QubitHamiltonian([("a", {0: "X"}), ("b", {1: "Z"})])
+   dH = H.diff("a")              # symbolic derivative
+   H2 = H.subs({"a": 2.0})       # substitute and evaluate

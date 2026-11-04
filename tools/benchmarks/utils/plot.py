@@ -21,6 +21,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 from . import hardware
+from .benchmark import route_stats
 
 
 def _group(measurements: list[dict]) -> dict[tuple[str, str], list[dict]]:
@@ -46,12 +47,11 @@ def _plot_group(
     for kind, points in sorted(by_kind.items()):
         points = sorted(points, key=lambda p: p[scaling_axis])
         xs = [p[scaling_axis] for p in points]
-        ys = [p["time_mean_s"] for p in points]
-        yerr = [p["time_stdev_s"] for p in points]
+        ys, yerr = zip(*(route_stats(p) for p in points))
         ax.errorbar(xs, ys, yerr=yerr, marker="o", capsize=3, label=kind)
 
     ax.set_xlabel(scaling_axis)
-    ax.set_ylabel("time [s] (mean ± stdev)")
+    ax.set_ylabel("time [s] (geo. mean ± geo. spread)")
     fixed_axis = "n_qubits" if scaling_axis == "n_terms" else "n_terms"
     fixed_value = entries[0][fixed_axis]
     ax.set_title(f"{op}  —  scaling with {scaling_axis}  ({fixed_axis}={fixed_value})")

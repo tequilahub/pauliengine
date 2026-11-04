@@ -12,7 +12,7 @@ Usage (from the repo root):
 
 Then plot with:
 
-    python -m tools.benchmarks.plot tools/benchmarks/results/latest.json
+    python -m tools.benchmarks.utils.plot tools/benchmarks/results/latest.json
 """
 
 from __future__ import annotations
@@ -23,13 +23,13 @@ import json
 import sys
 from pathlib import Path
 
-from . import benchmark, hardware
-from .generate import CoeffKind
+from ..utils import benchmark, hardware
+from ..utils.generate import CoeffKind
 
 
 def _default_output_path() -> Path:
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    return Path(__file__).parent / "results" / f"bench-{stamp}.json"
+    return Path(__file__).resolve().parents[1] / "results" / f"bench-{stamp}.json"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -110,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     ))
 
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
         "label": args.label,
         "config": {
