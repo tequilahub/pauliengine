@@ -202,6 +202,19 @@ class PauliOrbit {
                 }
 
 
+                /// scale * this as a PauliOrbitSum, since an orbit has no coefficient of
+                /// its own; scaling by 0 gives the empty sum.
+                PauliOrbitSum operator*(double scale) const {
+                        PauliOrbitSum out(n_qubits);
+                        if (scale != 0.0) {
+                                out.add(*this, Coeff(scale, 0.0));
+                        }
+                        return out;
+                }
+
+                /// scale * this as a PauliOrbitSum.
+                PauliOrbitSum operator*(int scale) const { return *this * static_cast<double>(scale); }
+
                 /// Product this * other in the orbit basis (complex coefficients).
                 PauliOrbitSum operator*(const PauliOrbit& other) const {
                         require_same_n_qubits(other, "operator*");
@@ -521,6 +534,22 @@ inline PauliOrbitSum PauliOrbitSum::commutator(const PauliOrbitSum& other) const
         result.prune_zeros();
         return result;
 }
+
+inline PauliOrbitSum PauliOrbitSum::operator*(double scale) const {
+        if (scale == 0.0) {
+                return PauliOrbitSum(n_qubits);
+        }
+        PauliOrbitSum out = *this;
+        for (auto& c : out.coeffs) {
+                c *= scale;
+        }
+        return out;
+}
+
+inline PauliOrbitSum operator*(double scale, const PauliOrbit& o) { return o * scale; }
+inline PauliOrbitSum operator*(int scale, const PauliOrbit& o) { return o * scale; }
+inline PauliOrbitSum operator*(double scale, const PauliOrbitSum& s) { return s * scale; }
+inline PauliOrbitSum operator*(int scale, const PauliOrbitSum& s) { return s * scale; }
 
 inline PauliOrbitSum PauliOrbitSum::operator*(const PauliOrbitSum& other) const {
         // ( sum_i a_i B_i )( sum_j b_j B_j ) = sum_{i,j} a_i b_j B_i B_j.

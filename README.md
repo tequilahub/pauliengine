@@ -177,6 +177,40 @@ needed.
 
 ---
 
+## Unweighted Pauli strings (Lie algebras only)
+
+`pe.PauliString` without a coefficient gives an unweighted string that keeps only
+the phase `i**k`, and `pe.QubitHamiltonian` of such strings is an ordered set of
+operators. **Use them only as basis elements of a Lie algebra**, for example to
+compute the dynamical Lie algebra of a set of generators. For linear combinations
+use weighted strings and Hamiltonians.
+
+```python
+generators = [pe.PauliString(w, phase=1) for w in ("ZI", "IZ", "XX")]   # i * P
+basis = pe.QubitHamiltonian(generators)
+while True:
+    size = len(basis)
+    basis += basis.commutator(basis)
+    if len(basis) == size:
+        break
+len(basis)   # dimension of the Lie algebra
+```
+
+- `commutator` is the Lie bracket without its factor 2: `a * b` if the strings
+  anti-commute, otherwise `None`. It is antisymmetric, satisfies the Jacobi
+  identity and keeps the exact phase, so structure constants can be read off.
+- A set holds every operator once, and the first phase seen for it wins, so
+  `A + A == A`. Its size is the dimension of the algebra.
+- Give the generators as `i * P` (`phase=1`): then every element of the closure
+  is anti-Hermitian, as in a real Lie algebra such as su(2^n).
+- `==` compares operator and phase, but `hash` only the operator, so a Python
+  `set` keeps `i * Z` and `-i * Z` apart. Collect a basis in a
+  `pe.QubitHamiltonian` instead.
+- Next to a weighted operator, or times a number, an unweighted string counts
+  with coefficient `1.0 * i**k` and the result is weighted.
+
+---
+
 ## OpenFermion bridge
 
 ```python

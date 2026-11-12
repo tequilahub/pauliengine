@@ -5,9 +5,12 @@
 #include <nanobind/stl/unordered_map.h>
 #include <nanobind/stl/map.h>
 #include <nanobind/stl/pair.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/ndarray.h>
 
 #include "pauliengine/QubitHamiltonian.h"
+#include "pauliengine/UnweightedPauliString.h"
+#include "pauliengine/UnweightedQubitHamiltonian.h"
 #include "pauliengine/PauliCycle.h"
 #include "pauliengine/PauliCycleSum.h"
 #include "pauliengine/PauliOrbit.h"
@@ -90,6 +93,15 @@ void bind_mul_ops(Cls& cls) {
          ...);
 }
 
+// Register a * s and s * a of class A for an int or float s.
+template <typename A, typename Cls>
+void bind_scale_ops(Cls& cls, const char* doc) {
+        cls.def("__mul__", [](const A& a, int s) { return a * s; }, nb::arg("scale"), doc)
+                .def("__mul__", [](const A& a, double s) { return a * s; }, nb::arg("scale"), doc)
+                .def("__rmul__", [](const A& a, int s) { return a * s; }, nb::arg("scale"), doc)
+                .def("__rmul__", [](const A& a, double s) { return a * s; }, nb::arg("scale"), doc);
+}
+
 // Register commutator(a, b) of class A for every B.
 template <typename A, typename... Bs, typename Cls>
 void bind_commutator_ops(Cls& cls) {
@@ -106,6 +118,44 @@ void bind_inner_ops(Cls& cls) {
                  "orthonormal (arXiv:2604.16701, Cor. 1 / Lemma 1). Conjugate-linear in self; multiply by "
                  "2**n for the unnormalized trace on n qubits. Orbits are never expanded."),
          ...);
+}
+
+// Arithmetic of an unweighted string or set U with a weighted operator W
+// (Arithmetic.h): U counts with coefficient 1.0 * i**k on every element.
+template <typename W, typename U, typename ClsW, typename ClsU>
+void bind_unweighted_pair(ClsW& cls_w, ClsU& cls_u) {
+        cls_w.def("__add__", [](const W& a, const U& b) { return a + b; },
+                  "Sum with an unweighted operator, which counts with coefficient 1.0 * i**phase.")
+             .def("__mul__", [](const W& a, const U& b) { return a * b; },
+                  "Product with an unweighted operator, which counts with coefficient 1.0 * i**phase.")
+             .def("commutator", [](const W& a, const U& b) { return commutator(a, b); }, nb::arg("other"),
+                  "Commutator with an unweighted operator, which counts with coefficient 1.0 * i**phase.");
+        cls_u.def("__add__", [](const U& a, const W& b) { return a + b; },
+                  "Sum with another operator; next to a weighted one this counts with coefficient 1.0 * i**phase.")
+             .def("__mul__", [](const U& a, const W& b) { return a * b; },
+                  "Product with another operator; next to a weighted one this counts with coefficient 1.0 * i**phase.")
+             .def("commutator", [](const U& a, const W& b) { return commutator(a, b); }, nb::arg("other"),
+                  "Commutator with another operator; next to a weighted one this counts with coefficient 1.0 * i**phase.");
+        cls_w.def("__sub__", [](const W& a, const U& b) { return a - b; },
+                  "Difference with an unweighted operator, which counts with coefficient 1.0 * i**phase.")
+             .def("inner_product", [](const W& a, const U& b) { return inner_product(a, b); }, nb::arg("other"),
+                  "Normalized Hilbert-Schmidt inner product with an unweighted operator, which counts with "
+                  "coefficient 1.0 * i**phase.");
+        cls_u.def("__sub__", [](const U& a, const W& b) { return a - b; },
+                  "Difference with a weighted operator; this counts with coefficient 1.0 * i**phase.")
+             .def("inner_product", [](const U& a, const W& b) { return inner_product(a, b); }, nb::arg("other"),
+                  "Normalized Hilbert-Schmidt inner product with a weighted operator; this counts with "
+                  "coefficient 1.0 * i**phase.");
+}
+
+// Coefficient lookup of an unweighted string in a Hamiltonian.
+template <typename H, typename ClsH>
+void bind_contains_unweighted(ClsH& cls_h) {
+        using U = unweighted_pauliString;
+        cls_h.def("contains", [](const H& a, const U& b) { return a.contains(as_weighted(b)); }, nb::arg("pauli_string"),
+                  "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its phase is ignored.")
+             .def("__contains__", [](const H& a, const U& b) { return coeff_nonzero(a.contains(as_weighted(b))); }, nb::arg("pauli_string"),
+                  "True if the Hamiltonian has a non-zero term with this operator.");
 }
 
 
@@ -138,7 +188,7 @@ NB_MODULE(_core, m) {
                 "From a complex coefficient and a map {qubit: 'X'/'Y'/'Z'/'I'}.")
                 .def(nb::init<const std::pair<std::complex<double>, std::vector<std::pair<char, int>>>>(), "From an OpenFermion-style pair (coefficient, [('X', qubit), ...]).")
                 .def(nb::init<std::complex<double>&, const std::string&>(),
-                "From a complex coefficient and a dense string such as 'XIZ' (character i acts on qubit i).")
+                "From a complex coefficient and a text: dense such as 'XIZ' (character i acts on qubit i) or sparse such as 'X0 Z2'.")
                 .def("to_string", &PauliString<std::complex<double>>::to_string, "Human-readable form, e.g. '1.000000 + 0.000000i : X(0)Z(2)'.")
                 .def("is_all_z", &PauliString<std::complex<double>>::is_all_z, "True if every non-identity operator is Z.")
                 .def("get_coeff", &PauliString<std::complex<double>>::get_coeff, "The coefficient of the Pauli string.")
@@ -219,6 +269,8 @@ NB_MODULE(_core, m) {
                 .def(nb::init<>(), "The zero Pauli string (identity operator, coefficient 0).")
                 .def(nb::init<SymEngine::Expression, const std::unordered_map<int, std::string>&>(),
                 "From a symbolic coefficient (Expression) and a map {qubit: 'X'/'Y'/'Z'/'I'}.")
+                .def(nb::init<SymEngine::Expression&, const std::string&>(),
+                "From a symbolic coefficient (Expression) and a text: dense such as 'XIZ' (character i acts on qubit i) or sparse such as 'X0 Z2'.")
                 .def(nb::init<const std::pair<SymEngine::Expression, std::vector<std::pair<char, int>>>>(),
                 "From an OpenFermion-style pair (Expression, [('X', qubit), ...]).")
                 .def("to_string", &PauliString<SymEngine::Expression>::to_string, "Human-readable form, e.g. '1.000000 + 0.000000i : X(0)Z(2)'.")
@@ -443,6 +495,110 @@ NB_MODULE(_core, m) {
                         return SymEngine::str(*e.get_basic());
                 }, "The expression as a string.");
 
+        // Pauli string without a coefficient
+        auto cls_up = nb::class_<unweighted_pauliString>(m, "unweighted_pauliString",
+                "A Pauli string without a coefficient: i**phase * P with phase in {0, 1, 2, 3}. Use it only as a basis element "
+                "of a Lie algebra; for linear combinations use weighted strings. The product of two such strings has an exact "
+                "phase; use to_pauli_string() to attach a coefficient.")
+                .def(nb::init<>(), "The identity with phase 0.")
+                .def(nb::init<const std::string&, int>(), nb::arg("paulis"), nb::arg("phase") = 0,
+                        "From a text, dense such as 'XIZ' or sparse such as 'X0 Z2'; phase is the exponent k of i**k.")
+                .def(nb::init<const std::unordered_map<int, std::string>&, int>(), nb::arg("paulis"), nb::arg("phase") = 0,
+                        "From a map {qubit: 'X'/'Y'/'Z'/'I'}; phase is the exponent k of i**k.")
+                .def(nb::init<const std::vector<std::pair<char, int>>&, int>(), nb::arg("paulis"), nb::arg("phase") = 0,
+                        "From a list of (Pauli, qubit) pairs; phase is the exponent k of i**k.")
+                .def(nb::init<const PSC&, int>(), nb::arg("string"), nb::arg("phase") = 0,
+                        "The operator part of a Pauli string; its coefficient is dropped.")
+                .def(nb::init<const PSS&, int>(), nb::arg("string"), nb::arg("phase") = 0,
+                        "The operator part of a symbolic Pauli string; its coefficient is dropped.")
+                .def_prop_ro("phase", &unweighted_pauliString::phase, "Exponent k of the phase i**k, in {0, 1, 2, 3}.")
+                .def_prop_ro("phase_factor", &unweighted_pauliString::phase_factor, "The phase i**k as a complex number.")
+                .def_prop_ro("x", [](const unweighted_pauliString& s) { return s.x.to_vector(); }, "x bits as 64-bit words (bit q set for X or Z on qubit q).")
+                .def_prop_ro("y", [](const unweighted_pauliString& s) { return s.y.to_vector(); }, "y bits as 64-bit words (bit q set for Y or Z on qubit q).")
+                .def("__mul__", &unweighted_pauliString::operator*, "Product of two strings, including the phase of the Pauli algebra.")
+                .def("__mul__", [](const unweighted_pauliString& s, std::complex<double> scale) { return s.to_pauli_string(scale); },
+                        "The weighted Pauli string with coefficient scale * i**phase.")
+                .def("__rmul__", [](const unweighted_pauliString& s, std::complex<double> scale) { return s.to_pauli_string(scale); },
+                        "The weighted Pauli string with coefficient scale * i**phase.")
+                .def("__imul__", &unweighted_pauliString::operator*=, "Multiply in place by another string.")
+                .def("__neg__", [](const unweighted_pauliString& s) { return -s; }, "The string multiplied by -1.")
+                .def("__eq__", &unweighted_pauliString::operator==, "True if both the operator and the phase are equal (see equals() for the operator only).")
+                .def("__hash__", [](const unweighted_pauliString& s) { return static_cast<Py_ssize_t>(s.hash()); }, "Hash over the operator part; ignores the phase.")
+                .def("__len__", &unweighted_pauliString::size, "Number of qubits with a non-identity operator (the weight).")
+                .def("__repr__", &unweighted_pauliString::to_string, "Human-readable form, e.g. '+i : X(0)Z(2)'.")
+                .def("__str__", &unweighted_pauliString::to_string, "Human-readable form, e.g. '+i : X(0)Z(2)'.")
+                .def("to_string", &unweighted_pauliString::to_string, "Human-readable form, e.g. '+i : X(0)Z(2)'.")
+                .def("equals", &unweighted_pauliString::equals, nb::arg("other"), "True if the operators are equal, ignoring the phases.")
+                .def("commutes", &unweighted_pauliString::commutes, nb::arg("other"), "True if the two strings commute, false if they anti-commute.")
+                .def("commutator", &unweighted_pauliString::commutator, nb::arg("other"),
+                        "The commutator without its factor 2: self * other if the strings anti-commute, otherwise None.")
+                .def("dagger", &unweighted_pauliString::dagger, "Hermitian conjugate: the operator stays and the phase is conjugated.")
+                .def("naked", &unweighted_pauliString::naked, "Copy of the string with phase 0.")
+                .def("to_pauli_string", [](const unweighted_pauliString& s, std::complex<double> coeff) { return s.to_pauli_string(coeff); },
+                        nb::arg("coeff") = std::complex<double>(1.0, 0.0), "The Pauli string with coefficient coeff * i**phase.")
+                .def("to_pauli_string", [](const unweighted_pauliString& s, const std::string& coeff) { return s.to_pauli_string(SymEngine::Expression(coeff)); },
+                        nb::arg("coeff"), "The symbolic Pauli string with coefficient coeff * i**phase; coeff is parsed like 'a*b'.")
+                .def("to_pauli_string", [](const unweighted_pauliString& s, const SymEngine::Expression& coeff) { return s.to_pauli_string(coeff); },
+                        nb::arg("coeff"), "The symbolic Pauli string with coefficient coeff * i**phase.")
+                .def("to_dictionary", &unweighted_pauliString::to_dictionary, "The string as a (phase factor, {qubit: 'X'/'Y'/'Z'}) pair.")
+                .def("qubits", &unweighted_pauliString::qubits, "Sorted list of the qubits with a non-identity operator.")
+                .def("size", &unweighted_pauliString::size, "Number of qubits with a non-identity operator (the weight).")
+                .def("count_y", &unweighted_pauliString::count_y, "Number of Y operators in the string.")
+                .def("get_pauli_at_index", &unweighted_pauliString::get_pauli_from_index, nb::arg("index"), "Pauli operator ('I', 'X', 'Y' or 'Z') on the given qubit.")
+                .def("key_openfermion", &unweighted_pauliString::key_openfermion, "OpenFermion-style key: list of (Pauli, qubit) pairs of the non-identity sites, sorted by qubit.")
+                .def("get_hash", [](const unweighted_pauliString& s) { return hash_limbs_to_int(s.get_hash()); },
+                        "Invertible int key of the operator part (phase ignored): sum_q p_q * 4**q with I=0, X=1, Y=2, Z=3.")
+                .def_static("from_hash", [](const nb::int_& hash, int phase) { return unweighted_pauliString::from_hash(hash_int_to_limbs(hash), phase); },
+                        nb::arg("hash"), nb::arg("phase") = 0, "Build the string whose get_hash() equals hash, with the given phase.");
+
+
+        // Set of Pauli strings with one phase per element, for Lie algebras
+        auto cls_uq = nb::class_<unweighted_QubitHamiltonian>(m, "unweighted_QubitHamiltonian",
+                "An ordered set of Pauli operators with one phase i**k per element. Use it only as the basis of a Lie algebra. "
+                "It is not a linear combination: every operator occurs once and the first phase seen for it wins, so A + A == A. "
+                "An element keeps its index.")
+                .def(nb::init<>(), "The empty set.")
+                .def(nb::init<const std::vector<unweighted_pauliString>&>(), nb::arg("terms"),
+                        "From a list of strings; later duplicates of an operator are ignored.")
+                .def(nb::init<const QHC&>(), nb::arg("hamiltonian"), "The operators of a Hamiltonian with phase 0; its coefficients are dropped.")
+                .def(nb::init<const QHS&>(), nb::arg("hamiltonian"), "The operators of a symbolic Hamiltonian with phase 0; its coefficients are dropped.")
+                .def("__len__", &unweighted_QubitHamiltonian::size, "Number of elements.")
+                .def("size", &unweighted_QubitHamiltonian::size, "Number of elements.")
+                .def("insert", &unweighted_QubitHamiltonian::insert, nb::arg("term"),
+                        "Add the string unless its operator is present; returns whether it was added.")
+                .def("__contains__", &unweighted_QubitHamiltonian::contains, nb::arg("term"),
+                        "True if the operator of the string is present, whatever the phases are.")
+                .def("index", [](const unweighted_QubitHamiltonian& h, const unweighted_pauliString& term) {
+                                const std::optional<size_t> i = h.find(term);
+                                if (!i) {
+                                        throw nb::value_error("unweighted_QubitHamiltonian: operator is not present");
+                                }
+                                return *i;
+                        }, nb::arg("term"), "Index of the operator of the string; raises ValueError if it is not present.")
+                .def("__getitem__", [](const unweighted_QubitHamiltonian& h, Py_ssize_t index) {
+                                const Py_ssize_t n = static_cast<Py_ssize_t>(h.size());
+                                if (index < -n || index >= n) {
+                                        throw nb::index_error("unweighted_QubitHamiltonian: index out of range");
+                                }
+                                return h.terms()[static_cast<size_t>(index < 0 ? index + n : index)];
+                        }, nb::arg("index"), "The element with the given index.")
+                .def("__iter__", [](const unweighted_QubitHamiltonian& h) { return nb::iter(nb::cast(h.terms())); }, "Iterate over the elements in insertion order.")
+                .def("terms", &unweighted_QubitHamiltonian::terms, "All elements in insertion order.")
+                .def("paulistrings", &unweighted_QubitHamiltonian::terms, "All elements in insertion order, as QubitHamiltonian.paulistrings().")
+                .def("__add__", &unweighted_QubitHamiltonian::operator+, "Union: the elements of self, then the new ones of other.")
+                .def("__iadd__", [](unweighted_QubitHamiltonian& h, const unweighted_QubitHamiltonian& other) -> unweighted_QubitHamiltonian& {
+                                h += other;
+                                return h;
+                        }, nb::rv_policy::none, "Add the new elements of other in place; existing indices stay.")
+                .def("__mul__", &unweighted_QubitHamiltonian::operator*, "The set of all products a * b in the order of a, then b.")
+                .def("commutator", &unweighted_QubitHamiltonian::commutator, nb::arg("other"),
+                        "The set of commutators without their factor 2: a * b for every anti-commuting pair.")
+                .def("__eq__", &unweighted_QubitHamiltonian::operator==, "Equal sets with equal phases, whatever the order of the elements is.")
+                .def("to_qubit_hamiltonian", [](const unweighted_QubitHamiltonian& h, std::complex<double> coeff) { return h.to_qubit_hamiltonian(coeff); },
+                        nb::arg("coeff") = std::complex<double>(1.0, 0.0), "The ordinary Hamiltonian with coefficient coeff * i**k on every element.")
+                .def("to_qubit_hamiltonian", [](const unweighted_QubitHamiltonian& h, const std::string& coeff) { return h.to_qubit_hamiltonian(SymEngine::Expression(coeff)); },
+                        nb::arg("coeff"), "The symbolic Hamiltonian with coefficient coeff * i**k on every element; coeff is parsed like 'a*b'.");
+
         // PauliCycle (complex coefficients only)
         auto cls_cy = nb::class_<PauliCycle>(m, "PauliCycleComplex",
                 "A Pauli string together with all of its cyclic rotations on n_qubits qubits, "
@@ -608,6 +764,15 @@ NB_MODULE(_core, m) {
                 .def("__len__", [](const PauliOrbitSum& s) { return s.size(); }, "Number of terms.");
 
         // Pauli decomposition of a matrix (PauliDecomposition.h).
+        // Scaling cycles and orbits by an int or float.
+        bind_scale_ops<PauliCycle>(cls_cy, "The cycle with its coefficient scaled by an int or float.");
+        bind_scale_ops<PauliCycleSum>(cls_cys,
+                "The sum with every coefficient scaled by an int or float; scaling by 0 gives the empty sum.");
+        bind_scale_ops<PauliOrbit>(cls_or,
+                "scale * self as a PauliOrbitSum, for an int or float; scaling by 0 gives the empty sum.");
+        bind_scale_ops<PauliOrbitSum>(cls_ors,
+                "The sum with every coefficient scaled by an int or float; scaling by 0 gives the empty sum.");
+
         cls_qhc.def_static("from_matrix",
                 [](nb::ndarray<const std::complex<double>, nb::ndim<2>, nb::c_contig, nb::device::cpu> m,
                    double threshold) {
@@ -669,4 +834,42 @@ NB_MODULE(_core, m) {
         bind_sum_ops<PauliOrbitSum, PSC, PSS, QHC, QHS, PauliCycle, PauliCycleSum, PauliOrbit, PauliOrbitSum>(cls_ors);
         bind_mul_ops<PauliOrbitSum, PSC, PSS, QHC, QHS, PauliCycle, PauliCycleSum, PauliOrbit>(cls_ors);
         bind_commutator_ops<PauliOrbitSum, PSC, PSS, QHC, QHS, PauliCycle, PauliCycleSum, PauliOrbit>(cls_ors);
+
+        // Unweighted strings and sets with every other kind of operator (Arithmetic.h).
+        using UPS = unweighted_pauliString;
+        using UQH = unweighted_QubitHamiltonian;
+        bind_unweighted_pair<PSC, UPS>(cls_psc, cls_up);
+        bind_unweighted_pair<PSS, UPS>(cls_pss, cls_up);
+        bind_unweighted_pair<QHC, UPS>(cls_qhc, cls_up);
+        bind_unweighted_pair<QHS, UPS>(cls_qhs, cls_up);
+        bind_unweighted_pair<PauliCycle, UPS>(cls_cy, cls_up);
+        bind_unweighted_pair<PauliCycleSum, UPS>(cls_cys, cls_up);
+        bind_unweighted_pair<PauliOrbit, UPS>(cls_or, cls_up);
+        bind_unweighted_pair<PauliOrbitSum, UPS>(cls_ors, cls_up);
+        bind_unweighted_pair<PSC, UQH>(cls_psc, cls_uq);
+        bind_unweighted_pair<PSS, UQH>(cls_pss, cls_uq);
+        bind_unweighted_pair<QHC, UQH>(cls_qhc, cls_uq);
+        bind_unweighted_pair<QHS, UQH>(cls_qhs, cls_uq);
+        bind_unweighted_pair<PauliCycle, UQH>(cls_cy, cls_uq);
+        bind_unweighted_pair<PauliCycleSum, UQH>(cls_cys, cls_uq);
+        bind_unweighted_pair<PauliOrbit, UQH>(cls_or, cls_uq);
+        bind_unweighted_pair<PauliOrbitSum, UQH>(cls_ors, cls_uq);
+        // A string and a set: the string counts as a set with one element. There is no
+        // difference of sets, so only + and * are defined.
+        cls_uq.def("__add__", [](const UQH& h, const UPS& s) { return h + s; },
+                   "Add the string unless its operator is present, as a new set.")
+              .def("__mul__", [](const UQH& h, const UPS& s) { return h * s; }, "The set of all products element * string.")
+              .def("commutator", [](const UQH& h, const UPS& s) { return commutator(h, s); }, nb::arg("other"),
+                   "The set of commutators without their factor 2 with the string.");
+        cls_up.def("__add__", [](const UPS& s, const UQH& h) { return s + h; },
+                   "The string followed by the new elements of the set.")
+              .def("__mul__", [](const UPS& s, const UQH& h) { return s * h; }, "The set of all products string * element.")
+              .def("commutator", [](const UPS& s, const UQH& h) { return commutator(s, h); }, nb::arg("other"),
+                   "The set of commutators without their factor 2 with every element.");
+        cls_uq.def("__mul__", [](const UQH& h, std::complex<double> s) { return h * s; },
+                   "The weighted Hamiltonian with coefficient scale * i**k on every element.")
+              .def("__rmul__", [](const UQH& h, std::complex<double> s) { return h * s; },
+                   "The weighted Hamiltonian with coefficient scale * i**k on every element.");
+        bind_contains_unweighted<QHC>(cls_qhc);
+        bind_contains_unweighted<QHS>(cls_qhs);
 }

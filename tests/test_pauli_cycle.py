@@ -307,6 +307,41 @@ class TestCycleSumAlgebra:
         assert (s1 * s2).to_qubit_hamiltonian() == h1 * h2
 
 
+# Scaling by an int or float keeps the type and scales the coefficients
+
+
+class TestScale:
+    @pytest.mark.parametrize("scale", [3, -2, 0.5, -1.25])
+    def test_cycle(self, scale):
+        c = pe.PauliCycle(4, "XYZI", 2.0)
+        for scaled in (c * scale, scale * c):
+            assert isinstance(scaled, type(c))
+            assert scaled == c
+            assert scaled.base.coeff == 2.0 * scale
+            assert scaled.to_qubit_hamiltonian() == c.to_qubit_hamiltonian() * float(scale)
+
+    @pytest.mark.parametrize("scale", [3, 0.5])
+    def test_cycle_sum(self, scale):
+        s = pe.PauliCycleSum([pe.PauliCycle(4, "XYZI", 2.0), pe.PauliCycle(4, "ZIXI", 1j)])
+        for scaled in (s * scale, scale * s):
+            assert isinstance(scaled, type(s))
+            assert len(scaled) == len(s)
+            assert scaled.to_qubit_hamiltonian() == s.to_qubit_hamiltonian() * float(scale)
+
+    def test_zero_gives_empty_sum(self):
+        s = pe.PauliCycleSum([pe.PauliCycle(4, "XYZI")])
+        assert len(s * 0) == 0
+        assert len(0.0 * s) == 0
+
+    def test_operand_is_unchanged(self):
+        c = pe.PauliCycle(4, "XYZI", 2.0)
+        s = pe.PauliCycleSum([c])
+        c * 3
+        s * 3
+        assert c.base.coeff == 2.0
+        assert s.data[0].base.coeff == 2.0
+
+
 # Unified representative: equality / hashing across rotations
 
 

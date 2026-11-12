@@ -181,6 +181,45 @@ class TestMultiply:
         assert qh_close(orbitsum_to_qh(a * b), reference)
 
 
+class TestScale:
+    @pytest.mark.parametrize("scale", [3, -2, 0.5])
+    def test_orbit_gives_sum(self, scale):
+        o = pe.PauliOrbit(4, 1, 1, 0)
+        for scaled in (o * scale, scale * o):
+            assert isinstance(scaled, pe.PauliOrbitSum)
+            assert scaled.n_qubits == 4
+            assert list(scaled.data) == [o]
+            assert list(scaled.coeffs) == [scale]
+
+    @pytest.mark.parametrize("scale", [3, 0.5])
+    def test_orbit_sum(self, scale):
+        s = pe.PauliOrbitSum(5)
+        s.add(pe.PauliOrbit(5, 1, 0, 0), 2.0)
+        s.add(pe.PauliOrbit(5, 0, 1, 1), 1j)
+        for scaled in (s * scale, scale * s):
+            assert isinstance(scaled, pe.PauliOrbitSum)
+            assert qh_close(orbitsum_to_qh(scaled), orbitsum_to_qh(s) * float(scale))
+
+    def test_zero_gives_empty_sum(self):
+        o = pe.PauliOrbit(4, 1, 0, 0)
+        s = o * 2
+        for scaled in (o * 0, 0.0 * o, s * 0, 0 * s):
+            assert len(scaled) == 0
+            assert scaled.n_qubits == 4
+
+    def test_scaled_sum_still_merges(self):
+        o = pe.PauliOrbit(4, 1, 0, 0)
+        s = o * 2
+        s.add(o, 1.0)
+        assert len(s) == 1
+        assert s.contains(o) == 3
+
+    def test_operand_is_unchanged(self):
+        s = pe.PauliOrbit(4, 1, 0, 0) * 2
+        s * 3
+        assert list(s.coeffs) == [2]
+
+
 # Input validation and invariants
 
 

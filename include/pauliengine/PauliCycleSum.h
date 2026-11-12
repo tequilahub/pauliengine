@@ -41,6 +41,10 @@ class PauliCycleSum {
                 /// Product this * other = sum_{i,j} c_i d_j, merged.
                 PauliCycleSum operator*(const PauliCycleSum& other) const;
 
+                /// Every coefficient multiplied by `scale`; scaling by 0 gives the empty sum.
+                PauliCycleSum operator*(double scale) const;
+                PauliCycleSum operator*(int scale) const { return *this * static_cast<double>(scale); }
+
                 /// Coefficient of `target`'s orbit in [this, other], without building
                 /// the full commutator.
                 Coeff targeted_commutator(const PauliCycleSum& other, const PauliCycle& target) const;

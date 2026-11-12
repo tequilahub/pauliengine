@@ -103,9 +103,12 @@ compressed. A product or commutator of two Pauli strings stays a Pauli string,
 and two Hamiltonians with the same coefficient type use their own operators.
 Every other combination expands both operands and returns a
 ``QubitHamiltonian``; it is symbolic as soon as one operand is symbolic.
-Scalar multiples of cycles and orbits are expressed through their coefficients
-(``PauliCycle(n, P, coeff)``, ``PauliOrbitSum.add(orbit, coeff)``); ``*`` with a
-plain number is not defined for them.
+An ``int`` or ``float`` on either side scales the coefficients and keeps the
+family: ``2 * c`` is a ``PauliCycle``, a scaled ``PauliCycleSum`` or
+``PauliOrbitSum`` keeps its type, and ``2 * o`` is a ``PauliOrbitSum``, since an
+orbit has no coefficient of its own. Scaling a sum by ``0`` gives the empty sum.
+Complex multiples are written through the coefficients
+(``PauliCycle(n, P, coeff)``, ``PauliOrbitSum.add(orbit, coeff)``).
 Expanding an orbit materializes all of its ``n_terms()`` Pauli strings, so this
 is only feasible for small orbits (the expansion refuses more than ``2e7``
 strings).

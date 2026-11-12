@@ -1,1 +1,0 @@
-"""PauliEngine benchmarking framework."""

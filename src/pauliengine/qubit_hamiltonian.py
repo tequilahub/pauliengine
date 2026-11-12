@@ -10,6 +10,8 @@ from ._core import (
     PauliStringSymbolic,
     QubitHamiltonianComplex,
     QubitHamiltonianSymbolic,
+    unweighted_pauliString,
+    unweighted_QubitHamiltonian,
 )
 
 if TYPE_CHECKING:
@@ -39,6 +41,15 @@ def _to_symbolic_ps(term) -> PauliStringSymbolic:
         c = complex(coeff)
         return PauliStringSymbolic(_complex_coeff_to_expression(c), ops)
     raise ValueError(f"Cannot convert {type(term)} to PauliStringSymbolic")
+
+
+def _weighted_term(term):
+    """A term of a list that mixes unweighted strings with weighted terms, as a Pauli string."""
+    if isinstance(term, unweighted_pauliString):
+        return term.to_pauli_string()
+    if isinstance(term, tuple) and not isinstance(term[0], str):
+        return PauliStringComplex(complex(term[0]), term[1])
+    return term
 
 
 def _is_qubit_operator(obj: Any) -> bool:
@@ -113,6 +124,13 @@ class QubitHamiltonianFactory:
     - ``list[tuple[coeff, dict[int, str]]]`` (coeff a number or a symbolic string)
     - ``openfermion.QubitOperator``
     - an existing ``QubitHamiltonianComplex`` / ``QubitHamiltonianSymbolic`` (copied)
+
+    A list of Pauli strings without a coefficient gives an
+    ``unweighted_QubitHamiltonian``: an ordered set of operators with one phase each,
+    meant as the basis of a Lie algebra. It is not a linear combination, so
+    ``A + A == A``, and its ``commutator`` omits the factor 2. Next to terms with a
+    coefficient, a string without one becomes a term of the Hamiltonian's type with
+    the coefficient ``i**phase``.
     """
 
     __slots__ = ["_builders", "_name"]
@@ -147,9 +165,19 @@ class QubitHamiltonianFactory:
             builder = type(pauli_strings)
             return builder(pauli_strings.paulistrings())
 
+        if isinstance(pauli_strings, unweighted_QubitHamiltonian):
+            return unweighted_QubitHamiltonian(pauli_strings.terms())
+
         if not pauli_strings:
             # Empty list → zero Complex Hamiltonian
             return QubitHamiltonianComplex.zero()
+
+        if all(isinstance(t, unweighted_pauliString) for t in pauli_strings):
+            return unweighted_QubitHamiltonian(list(pauli_strings))
+
+        # Next to weighted terms, an unweighted string gets the coefficient i**phase.
+        if any(isinstance(t, unweighted_pauliString) for t in pauli_strings):
+            pauli_strings = [_weighted_term(t) for t in pauli_strings]
 
         arg_type = _check_pauli_strings_type(pauli_strings)
         builder = self._builders.get(arg_type)

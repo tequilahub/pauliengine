@@ -213,6 +213,16 @@ class PauliCycle {
                         return PauliCycleSum(std::move(result));
                 }
 
+                /// The cycle with its coefficient multiplied by `scale`.
+                PauliCycle operator*(double scale) const {
+                        PauliCycle out = *this;
+                        out.Base.coeff *= scale;
+                        return out;
+                }
+
+                /// The cycle with its coefficient multiplied by `scale`.
+                PauliCycle operator*(int scale) const { return *this * static_cast<double>(scale); }
+
                 /// [C(P), C(Q)] = sum_k C([P, R^k Q]) (Eq. 40). Only shifts k at which
                 /// the supports overlap can contribute (Corollary 3); different shifts
                 /// landing in the same rotation orbit are merged by PauliCycleSum.
@@ -561,6 +571,22 @@ inline PauliCycleSum PauliCycleSum::operator*(const PauliCycleSum& other) const 
         }
         return PauliCycleSum(std::move(combined));
 }
+
+inline PauliCycleSum PauliCycleSum::operator*(double scale) const {
+        if (scale == 0.0) {
+                return PauliCycleSum();
+        }
+        PauliCycleSum out = *this;
+        for (auto& c : out.data) {
+                c.Base.coeff *= scale;
+        }
+        return out;
+}
+
+inline PauliCycle operator*(double scale, const PauliCycle& c) { return c * scale; }
+inline PauliCycle operator*(int scale, const PauliCycle& c) { return c * scale; }
+inline PauliCycleSum operator*(double scale, const PauliCycleSum& s) { return s * scale; }
+inline PauliCycleSum operator*(int scale, const PauliCycleSum& s) { return s * scale; }
 
 inline PauliCycleSum::Coeff PauliCycleSum::targeted_commutator(const PauliCycleSum& other,
                                                                const PauliCycle& target) const {

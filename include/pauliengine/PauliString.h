@@ -7,6 +7,10 @@
 #include <bit>
 #include <functional>
 #include <cstdint>
+#include <algorithm>
+#include <sstream>
+#include <stdexcept>
+#include <string>
 #include <symengine/expression.h>
 #include <symengine/symbol.h>
 #include <symengine/complex.h>
@@ -136,6 +140,107 @@ class WordVec {
 };
 
 
+/// Operator part of the product of two Pauli strings in the symplectic form.
+/// Writes max(n1, n2) words to out_x and out_y and returns the exponent k of the
+/// phase i^k; the two strings anti-commute exactly if k is odd.
+/// Source: https://arxiv.org/pdf/2103.02202 figure 12
+inline int multiply_symplectic_words(const uint64_t* x1, const uint64_t* y1, size_t n1,
+                                     const uint64_t* x2, const uint64_t* y2, size_t n2,
+                                     uint64_t* out_x, uint64_t* out_y) {
+        const size_t n_min = n1 < n2 ? n1 : n2;
+        const size_t n_max = n1 < n2 ? n2 : n1;
+        // The 1s and 2s bits of 64 mod4 counters.
+        uint64_t c1 = 0;
+        uint64_t c2 = 0;
+        for (size_t k = 0; k < n_min; k++) {
+                const uint64_t xa = x1[k];
+                const uint64_t ya = y1[k];
+                const uint64_t xb = x2[k];
+                const uint64_t yb = y2[k];
+                const uint64_t nx = xa ^ xb;
+                const uint64_t ny = ya ^ yb;
+                out_x[k] = nx;
+                out_y[k] = ny;
+                const uint64_t x1y2 = xa & yb;
+                const uint64_t anti_commutes = (xb & ya) ^ x1y2;
+                c2 ^= (c1 ^ nx ^ ny ^ x1y2) & anti_commutes;
+                c1 ^= anti_commutes;
+        }
+        // Tail beyond the shorter operand comes straight from the longer one.
+        const uint64_t* tail_x = (n1 < n2) ? x2 : x1;
+        const uint64_t* tail_y = (n1 < n2) ? y2 : y1;
+        for (size_t k = n_min; k < n_max; k++) {
+                out_x[k] = tail_x[k];
+                out_y[k] = tail_y[k];
+        }
+        return 2 * std::popcount(c2) - std::popcount(c1);
+}
+
+/// Sets one operator in the symplectic form, growing the words as needed. Rejects
+/// unknown operators, negative qubits and a qubit that already has an operator.
+inline void set_pauli_bits(WordVec& x, WordVec& y, int qubit, char pauli) {
+        if (pauli != 'I' && pauli != 'X' && pauli != 'Y' && pauli != 'Z') {
+                throw std::invalid_argument(std::string("invalid Pauli operator '") + pauli + "'");
+        }
+        if (qubit < 0) {
+                throw std::invalid_argument("qubit indices must be non-negative");
+        }
+        if (pauli == 'I') {
+                return;
+        }
+        const size_t word = static_cast<size_t>(qubit) / BITS_IN_INTEGER;
+        if (x.size() <= word) {
+                x.resize(word + 1);
+                y.resize(word + 1);
+        }
+        const uint64_t mask = uint64_t{1} << (static_cast<size_t>(qubit) % BITS_IN_INTEGER);
+        if ((x[word] | y[word]) & mask) {
+                throw std::invalid_argument("qubit " + std::to_string(qubit) + " given twice");
+        }
+        if (pauli == 'X' || pauli == 'Z') {
+                x[word] |= mask;
+        }
+        if (pauli == 'Y' || pauli == 'Z') {
+                y[word] |= mask;
+        }
+}
+
+/// Parses a dense text such as "XIZ" (character i acts on qubit i) or a sparse one
+/// such as "X0 Z2"; any digit selects the sparse form. Empty is the identity. The
+/// words may keep trailing zeros, which the caller has to trim.
+inline void parse_pauli_text(const std::string& text, WordVec& x, WordVec& y) {
+        const bool sparse = std::any_of(text.begin(), text.end(), [](char c) { return c >= '0' && c <= '9'; });
+        if (!sparse) {
+                const size_t n_words = (text.size() + BITS_IN_INTEGER - 1) / BITS_IN_INTEGER;
+                x.resize(n_words);
+                y.resize(n_words);
+                for (size_t i = 0; i < text.size(); ++i) {
+                        const uint64_t mask = uint64_t{1} << (i % BITS_IN_INTEGER);
+                        const size_t word = i / BITS_IN_INTEGER;
+                        switch (text[i]) {
+                                case 'I': break;
+                                case 'X': x[word] |= mask; break;
+                                case 'Y': y[word] |= mask; break;
+                                case 'Z': x[word] |= mask; y[word] |= mask; break;
+                                default:
+                                        throw std::invalid_argument(std::string("invalid Pauli operator '") + text[i]
+                                                                    + "' in '" + text.substr(0, 40) + "'");
+                        }
+                }
+                return;
+        }
+        std::istringstream tokens(text);
+        std::string token;
+        while (tokens >> token) {
+                const bool has_index = token.size() >= 2 && token.size() <= 10
+                        && std::all_of(token.begin() + 1, token.end(), [](char c) { return c >= '0' && c <= '9'; });
+                if (!has_index) {
+                        throw std::invalid_argument("invalid Pauli term '" + token + "', expected a form such as 'X0'");
+                }
+                set_pauli_bits(x, y, std::stoi(token.substr(1)), token[0]);
+        }
+}
+
 template<typename Coeff>
 class PauliString {
         public:
@@ -203,15 +308,12 @@ class PauliString {
                 /**
                  * @brief Construct a new Pauli String object
                  *
-                 * @param pauli_string : A string representation of the Pauli string.
+                 * @param pauli_string : Dense such as "XIZ" or sparse such as "X0 Z2".
                  * @param coeff : The coefficient associated with the Pauli string.
                  */
                 PauliString(Coeff &coeff, const std::string &pauli_string){
                         this->coeff = coeff;
-                        uint64_t mask;
-                        for (size_t i = 0; i < pauli_string.size(); i++) {
-                                get_symplectic_form(i, mask, std::string(1, pauli_string[i]));
-                        }
+                        parse_pauli_text(pauli_string, this->x, this->y);
                         trim_trailing_zero_words();
                 }
 
@@ -251,47 +353,16 @@ class PauliString {
                 }
 
                 PauliString operator*(const PauliString& other) const {
-                        // Source: https://arxiv.org/pdf/2103.02202 figure 12
-                        const uint64_t *x1 = x.data();
-                        const uint64_t *y1 = y.data();
-                        const uint64_t *x2 = other.x.data();
-                        const uint64_t *y2 = other.y.data();
-                        const size_t n1 = x.size();
-                        const size_t n2 = other.x.size();
-                        const size_t n_min = n1 < n2 ? n1 : n2;
-                        const size_t n_max = n1 < n2 ? n2 : n1;
-
+                        const size_t n_max = std::max(x.size(), other.x.size());
                         WordVec new_x(n_max);
                         WordVec new_y(n_max);
-
-                        // The 1s and 2s bits of 64 mod4 counters.
-                        uint64_t c1 = 0;
-                        uint64_t c2 = 0;
-                        // Single pass over the overlapping 64 bit chunks: compute the
-                        // product words and accumulate anti-commutation counts.
-                        for (size_t k = 0; k < n_min; k++) {
-                            const uint64_t xa = x1[k];
-                            const uint64_t ya = y1[k];
-                            const uint64_t xb = x2[k];
-                            const uint64_t yb = y2[k];
-                            const uint64_t nx = xa ^ xb;
-                            const uint64_t ny = ya ^ yb;
-                            new_x[k] = nx;
-                            new_y[k] = ny;
-                            const uint64_t x1y2 = xa & yb;
-                            const uint64_t anti_commutes = (xb & ya) ^ x1y2;
-                            c2 ^= (c1 ^ nx ^ ny ^ x1y2) & anti_commutes;
-                            c1 ^= anti_commutes;
-                        }
-                        // Tail beyond the shorter operand comes straight from the longer one.
-                        const uint64_t *tail_x = (n1 < n2) ? x2 : x1;
-                        const uint64_t *tail_y = (n1 < n2) ? y2 : y1;
-                        std::copy(tail_x + n_min, tail_x + n_max, new_x.begin() + n_min);
-                        std::copy(tail_y + n_min, tail_y + n_max, new_y.begin() + n_min);
+                        const int power_of_i = multiply_symplectic_words(
+                                x.data(), y.data(), x.size(),
+                                other.x.data(), other.y.data(), other.x.size(),
+                                new_x.data(), new_y.data());
 
                         // Update coefficient accounting for factors of i gained from Pauli multiplications.
                         auto new_coeff = this->coeff * other.coeff;
-                        int power_of_i = 2 * std::popcount(c2) - std::popcount(c1);
                         if (power_of_i & 1) {
                             new_coeff *= std::complex<double>(0.0, 1.0);
                         }

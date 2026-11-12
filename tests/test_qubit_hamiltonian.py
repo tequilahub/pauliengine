@@ -1,4 +1,8 @@
 import math
+import os
+import random
+import subprocess
+import sys
 
 import pytest
 
@@ -1173,3 +1177,120 @@ class TestContains:
         assert _core.PauliStringSymbolic.to_complex(qh.contains({1: "Z"})) == pytest.approx(2.0 + 0j)
         assert _core.PauliStringSymbolic.to_complex(qh.contains(pe.PauliString(1.0, {1: "Z"}))) == pytest.approx(2.0 + 0j)
         assert _core.PauliStringSymbolic.to_complex(qh.contains({0: "Y"})) == pytest.approx(0j)
+
+
+# Sums large enough for the parallel compaction, with many equal operators.
+_LARGE_SUM_SCRIPT = """
+import random
+import pauliengine as pe
+
+rng = random.Random(7)
+
+
+def terms(count, n):
+    return [(complex(rng.uniform(-1, 1), rng.uniform(-1, 1)), {q: rng.choice("XYZ") for q in rng.sample(range(n), 3)})
+            for _ in range(count)]
+
+
+for n in (6, 70, 200):
+    a = pe.QubitHamiltonian(terms(150, n))
+    b = pe.QubitHamiltonian(terms(150, n))
+    long_list = pe.QubitHamiltonian(terms(6000, n))
+    for h in (a * b, a.commutator(b), long_list):
+        print([(c.real.hex(), c.imag.hex(), sorted(ops.items())) for c, ops in h.to_dictionary()])
+"""
+
+
+def _large_sum_output(threads):
+    env = {**os.environ, "OMP_NUM_THREADS": str(threads)}
+    return subprocess.run([sys.executable, "-c", _LARGE_SUM_SCRIPT], env=env, capture_output=True, text=True,
+                          check=True).stdout
+
+
+class TestParallelCompaction:
+    def test_result_is_bitwise_independent_of_thread_count(self):
+        serial = _large_sum_output(1)
+        assert serial
+        assert _large_sum_output(2) == serial
+        assert _large_sum_output(7) == serial
+
+    @pytest.mark.parametrize("n_qubits", [6, 70, 200])
+    @pytest.mark.parametrize("operation", ["product", "commutator"])
+    def test_large_results_match_term_by_term_sum(self, n_qubits, operation):
+        rng = random.Random(n_qubits)
+
+        def strings(count):
+            return [
+                pe.PauliString(complex(rng.uniform(-1, 1), rng.uniform(-1, 1)),
+                               {q: rng.choice("XYZ") for q in rng.sample(range(n_qubits), 3)})
+                for _ in range(count)
+            ]
+
+        sa, sb = strings(120), strings(120)
+        a, b = pe.QubitHamiltonian(sa), pe.QubitHamiltonian(sb)
+        result = a * b if operation == "product" else a.commutator(b)
+
+        expected = {}
+        for pa in a.to_list():
+            for pb in b.to_list():
+                if operation == "product":
+                    term = pa * pb
+                else:
+                    term = pa.commutator(pb)
+                    if not term.get_coeff():
+                        continue
+                key = term.get_hash()
+                expected[key] = expected.get(key, 0) + complex(term.get_coeff())
+
+        got = {t.get_hash(): complex(t.get_coeff()) for t in result.to_list()}
+        assert got.keys() == {k for k, v in expected.items() if v != 0}
+        assert all(abs(got[k] - expected[k]) < 1e-12 for k in got)
+
+    @pytest.mark.parametrize("count", [3, 40, 150])
+    def test_mixed_lengths_and_identity_products_match_term_by_term_sum(self, count):
+        rng = random.Random(count)
+        lengths = [1, 2, 63, 64, 65, 128, 129, 300, 512]
+
+        def strings():
+            out = []
+            for _ in range(count):
+                top = rng.choice(lengths)
+                sites = {q: rng.choice("XYZ") for q in rng.sample(range(top), min(top, 3))}
+                out.append(pe.PauliString(complex(rng.uniform(-1, 1), rng.uniform(-1, 1)), sites))
+            return out
+
+        shared = strings()
+        a = pe.QubitHamiltonian(shared + strings())
+        b = pe.QubitHamiltonian(shared + strings())  # equal terms give identity products
+
+        def summed(pair_term):
+            expected = {}
+            for pa in a.to_list():
+                for pb in b.to_list():
+                    term = pair_term(pa, pb)
+                    key = term.get_hash()
+                    expected[key] = expected.get(key, 0) + complex(term.get_coeff())
+            return {k: v for k, v in expected.items() if v != 0}
+
+        for result, pair_term in ((a * b, lambda p, q: p * q), (a.commutator(b), lambda p, q: p.commutator(q))):
+            got = {t.get_hash(): complex(t.get_coeff()) for t in result.to_list()}
+            expected = summed(pair_term)
+            assert got.keys() == expected.keys()
+            assert all(abs(got[k] - expected[k]) < 1e-12 for k in got)
+
+    def test_many_terms_on_few_operators_keep_their_exact_sum(self):
+        # Long runs of equal keys walk through every byte of the radix sort.
+        terms = [(float(i % 7), {3: "X", 70: "Z"}) for i in range(10000)]
+        terms += [(1.0, {3: "X", 70: "Y"}) for _ in range(10000)]
+        h = pe.QubitHamiltonian(terms)
+        assert sorted(complex(c).real for c, _ in h.to_dictionary()) == [10000.0, sum(float(i % 7) for i in range(10000))]
+
+    def test_terms_that_cancel_are_dropped_in_parallel_path(self):
+        strings = [(1.5, {q: "X", q + 1: "Z"}) for q in range(5000)]
+        h = pe.QubitHamiltonian(strings + [(-c, ops) for c, ops in strings])
+        assert h.to_dictionary() == []
+
+    def test_constructor_merges_in_parallel_path(self):
+        h = pe.QubitHamiltonian([(0.5, {q % 10: "Y"}) for q in range(20000)])
+        assert sorted((complex(c), tuple(ops.items())) for c, ops in h.to_dictionary()) == sorted(
+            (complex(1000), ((q, "Y"),)) for q in range(10))

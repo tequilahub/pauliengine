@@ -16,6 +16,9 @@
 /// - Every other combination expands both operands with as_hamiltonian() and
 ///   returns a QubitHamiltonian. Its coefficients are symbolic as soon as one
 ///   operand is symbolic, otherwise complex.
+/// - An unweighted string or set next to a weighted operator is upgraded first,
+///   with coefficient 1.0 times its phase i^k (see the end of this header). Two
+///   unweighted operands stay unweighted.
 
 #include <algorithm>
 #include <bit>
@@ -31,6 +34,7 @@
 #include "pauliengine/QubitHamiltonian.h"
 #include "pauliengine/PauliCycle.h"
 #include "pauliengine/PauliOrbit.h"
+#include "pauliengine/UnweightedQubitHamiltonian.h"
 
 // ---------------------------------------------------------------------------
 // Conversion of every representation to a QubitHamiltonian
@@ -422,4 +426,111 @@ pauliengine_detail::inner_t<A, B> inner_product(const A& a, const B& b) {
         } else {
                 return hamiltonian_inner<R>(lift<A, B>(a), lift<B, A>(b));
         }
+}
+
+// ---------------------------------------------------------------------------
+// Unweighted Pauli strings and sets
+// ---------------------------------------------------------------------------
+//
+// Next to a weighted operator, an unweighted string or set is upgraded to a
+// weighted one: every element gets the coefficient 1.0 times its phase i^k, and
+// the operation then follows the rules above. Two unweighted operands stay
+// unweighted, with the set semantics of unweighted_QubitHamiltonian.
+
+/// An unweighted string as a weighted one, with coefficient 1.0 * i^phase.
+inline PauliString<std::complex<double>> as_weighted(const unweighted_pauliString& s) {
+        return s.to_pauli_string(std::complex<double>(1.0, 0.0));
+}
+
+/// An unweighted set as a Hamiltonian, with coefficient 1.0 * i^k on every element.
+inline QubitHamiltonian<std::complex<double>> as_weighted(const unweighted_QubitHamiltonian& h) {
+        return h.to_qubit_hamiltonian(std::complex<double>(1.0, 0.0));
+}
+
+/// An unweighted string as a set with one element.
+inline unweighted_QubitHamiltonian as_unweighted_set(const unweighted_pauliString& s) {
+        return unweighted_QubitHamiltonian(std::vector<unweighted_pauliString>{s});
+}
+
+template <typename T>
+concept Unweighted = std::is_same_v<T, unweighted_pauliString> || std::is_same_v<T, unweighted_QubitHamiltonian>;
+
+template <typename T>
+concept Scalar = std::is_arithmetic_v<T> || std::is_same_v<T, std::complex<double>>;
+
+// Unweighted with weighted: upgrade the unweighted side.
+
+template <typename A, typename B>
+        requires(Unweighted<A> && OperatorLike<B>)
+auto operator+(const A& a, const B& b) { return as_weighted(a) + b; }
+template <typename A, typename B>
+        requires(OperatorLike<A> && Unweighted<B>)
+auto operator+(const A& a, const B& b) { return a + as_weighted(b); }
+
+template <typename A, typename B>
+        requires(Unweighted<A> && OperatorLike<B>)
+auto operator-(const A& a, const B& b) { return as_weighted(a) - b; }
+template <typename A, typename B>
+        requires(OperatorLike<A> && Unweighted<B>)
+auto operator-(const A& a, const B& b) { return a - as_weighted(b); }
+
+template <typename A, typename B>
+        requires(Unweighted<A> && OperatorLike<B>)
+auto operator*(const A& a, const B& b) { return as_weighted(a) * b; }
+template <typename A, typename B>
+        requires(OperatorLike<A> && Unweighted<B>)
+auto operator*(const A& a, const B& b) { return a * as_weighted(b); }
+
+template <typename A, typename B>
+        requires(Unweighted<A> && OperatorLike<B>)
+auto commutator(const A& a, const B& b) { return commutator(as_weighted(a), b); }
+template <typename A, typename B>
+        requires(OperatorLike<A> && Unweighted<B>)
+auto commutator(const A& a, const B& b) { return commutator(a, as_weighted(b)); }
+
+template <typename A, typename B>
+        requires(Unweighted<A> && OperatorLike<B>)
+auto inner_product(const A& a, const B& b) { return inner_product(as_weighted(a), b); }
+template <typename A, typename B>
+        requires(OperatorLike<A> && Unweighted<B>)
+auto inner_product(const A& a, const B& b) { return inner_product(a, as_weighted(b)); }
+
+/// An unweighted set times a number, as a weighted Hamiltonian.
+template <typename S>
+        requires Scalar<S>
+QubitHamiltonian<std::complex<double>> operator*(const unweighted_QubitHamiltonian& h, S scale) {
+        return as_weighted(h) * std::complex<double>(scale);
+}
+template <typename S>
+        requires Scalar<S>
+QubitHamiltonian<std::complex<double>> operator*(S scale, const unweighted_QubitHamiltonian& h) {
+        return as_weighted(h) * std::complex<double>(scale);
+}
+
+// A set and a string: the string counts as a set with one element. Two strings
+// have no sum, since it would be unclear whether a set or a linear combination is
+// meant.
+
+/// Union of a set and a string; the string is added unless its operator is present.
+inline unweighted_QubitHamiltonian operator+(const unweighted_QubitHamiltonian& h, const unweighted_pauliString& s) {
+        return h + as_unweighted_set(s);
+}
+inline unweighted_QubitHamiltonian operator+(const unweighted_pauliString& s, const unweighted_QubitHamiltonian& h) {
+        return as_unweighted_set(s) + h;
+}
+
+/// Every element times the string.
+inline unweighted_QubitHamiltonian operator*(const unweighted_QubitHamiltonian& h, const unweighted_pauliString& s) {
+        return h * as_unweighted_set(s);
+}
+inline unweighted_QubitHamiltonian operator*(const unweighted_pauliString& s, const unweighted_QubitHamiltonian& h) {
+        return as_unweighted_set(s) * h;
+}
+
+/// Commutators without their factor 2, see unweighted_QubitHamiltonian::commutator.
+inline unweighted_QubitHamiltonian commutator(const unweighted_QubitHamiltonian& h, const unweighted_pauliString& s) {
+        return h.commutator(as_unweighted_set(s));
+}
+inline unweighted_QubitHamiltonian commutator(const unweighted_pauliString& s, const unweighted_QubitHamiltonian& h) {
+        return as_unweighted_set(s).commutator(h);
 }

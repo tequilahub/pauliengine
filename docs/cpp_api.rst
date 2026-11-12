@@ -21,6 +21,10 @@ Pauli strings
    :members:
    :undoc-members:
 
+.. doxygenclass:: unweighted_pauliString
+   :members:
+   :undoc-members:
+
 .. doxygenclass:: WordVec
    :members:
    :undoc-members:
@@ -29,6 +33,10 @@ Qubit Hamiltonians
 ------------------
 
 .. doxygenclass:: QubitHamiltonian
+   :members:
+   :undoc-members:
+
+.. doxygenclass:: unweighted_QubitHamiltonian
    :members:
    :undoc-members:
 

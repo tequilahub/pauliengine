@@ -13,6 +13,20 @@ Pauli decomposition of matrices.
 
 ### Added
 
+- **Unweighted Pauli strings for Lie algebras**: `pe.PauliString` without a coefficient
+  (`pe.PauliString("XIZ")`, `phase=1` for `i * P`) stores only the exponent `k` of the
+  phase `i**k` as an exact integer modulo 4. `pe.QubitHamiltonian` of such strings is an
+  ordered set with one phase per element, stable indices and a hash index; it is not a
+  linear combination, so `A + A == A`. `commutator` omits the factor 2 for both. A scalar
+  or a weighted factor gives a weighted result. Next to any weighted operator (Pauli
+  strings, Hamiltonians, cycles and orbits) an unweighted string or set counts with
+  coefficient `1.0 * i**phase` per element in `+`, `-`, `*`, `commutator` and
+  `inner_product`, and the result follows the rules for the weighted operand. A set with
+  a single unweighted string stays unweighted (`+` adds it, `*` and `commutator` act on
+  every element); two unweighted strings have no sum.
+- `pe.PauliString(coeff, "XIZ")` takes a dense string for complex and symbolic
+  coefficients, which is much faster than a dict. Invalid operators in a text and a
+  qubit given twice now raise `ValueError`.
 - **Pauli cycles** (translation-invariant operators): `PauliCycle(n, base, coeff)`
   stands for `coeff * sum_k R^k P` over all `n` cyclic rotations of `P`; the base
   can be a dict, a dense string such as `"XIY"` or a `PauliString`.
@@ -51,6 +65,10 @@ Pauli decomposition of matrices.
   combinations return a `QubitHamiltonian`, symbolic as soon as one operand is
   symbolic. In C++ these are overloaded operators and the free function
   `commutator(a, b)` (`Arithmetic.h`).
+- Cycles and orbits can be scaled by an `int` or `float` on either side. A
+  `PauliCycle`, `PauliCycleSum` or `PauliOrbitSum` keeps its type; a `PauliOrbit`,
+  which has no coefficient of its own, becomes a `PauliOrbitSum`. Scaling a sum by
+  0 gives the empty sum.
 - **Inner products**: `a.inner_product(b)` and `pe.inner_product(a, b)` give the
   Hilbert-Schmidt inner product normalized so that Pauli strings are
   orthonormal, `Tr(a^dagger b) / 2^n` (Corollary 1, Lemma 1), for every pair of
@@ -67,13 +85,20 @@ Pauli decomposition of matrices.
 - Documentation: Sphinx site under `docs/` (user guide, Python and C++
   reference via Breathe/Doxygen); install the tools with the `docs` dependency
   group.
-- Benchmarks under `tools/benchmarks/` for cycles and orbits against the naive
-  `QubitHamiltonian` route and against g-sim, with power-law fits, and a smoke
-  test comparing nested commutators with a plain-Python computation
+- A smoke test comparing nested commutators with a plain-Python computation
   (`tools/commutator_precision_smoke.py`).
 
 ### Changed
 
+- `pe.PauliString()`, `pe.PauliString("a")` and other calls without a coefficient no longer
+  give a zero string or a symbolic multiple of the identity, see the Pauli strings above.
+  Use `pe.PauliString("a", {})` for the latter.
+- Faster `QubitHamiltonian` product, commutator and compaction for complex
+  coefficients on up to 512 qubits: pairs are computed without temporary Pauli
+  strings, terms are sorted with a radix sort, and large inputs run through a parallel
+  sample sort without a serial merge step. Coefficients of equal operators are added
+  in input order, so results no longer depend on the thread count.
+- Constructors no longer copy all terms through the return value of `compact()`.
 - Constructing a `PauliCycle` or `PauliOrbit` validates its input: a base acting
   beyond `n_qubits`, `n_qubits < 1` (cycles), an invalid label or
   `n_qubits > 170` (orbits), and operations on mismatched `n_qubits` raise
@@ -81,10 +106,6 @@ Pauli decomposition of matrices.
 - Python docstrings of `PauliString` and `QubitHamiltonian` were reviewed and
   corrected (for example `to_string`, `to_dictionary`, `simplify`, `conjugate`,
   and the constructors of the symbolic classes).
-- Benchmark result files store every raw timing sample instead of precomputed
-  means (`schema_version` 2); the plotting tools derive the statistics and still
-  read older files. The benchmark tools are split into `native/`, `gsim/` and
-  `utils/`.
 
 ### Fixed
 

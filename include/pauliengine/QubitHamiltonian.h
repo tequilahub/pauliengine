@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <algorithm>
 #include <cctype>
+#include <memory>
 #include <sstream>
 
 #include "pauliengine/PauliString.h"
@@ -52,13 +53,13 @@ class QubitHamiltonian{
 
         QubitHamiltonian(const std::vector<PauliString<Coeff>>& data){
                 this->data = data;
-                this->compact();
+                this->compact_in_place();
         }
 
 
         QubitHamiltonian(std::vector<PauliString<Coeff>>&& data){
                 this->data = std::move(data);
-                this->compact();
+                this->compact_in_place();
         }
 
         /// Fast-path constructor: skips compact(). Only use when you can prove
@@ -74,7 +75,7 @@ class QubitHamiltonian{
                         converted_data.push_back(PauliString<Coeff>(entry.first, entry.second));
                 }
                 this->data = converted_data;
-                this->compact();
+                this->compact_in_place();
         }
 
         QubitHamiltonian trace_out_qubits(const std::vector<int>& qubits, const std::vector<int>& state) const {
@@ -137,6 +138,14 @@ class QubitHamiltonian{
         }
 
         QubitHamiltonian operator*(const QubitHamiltonian& other) const{ 
+                if constexpr (std::is_same_v<Coeff, std::complex<double>>) {
+                        std::vector<PauliString<Coeff>> merged;
+                        if (with_small_key(max_word_count(data, other.data),
+                                           [&]<size_t W>() { product_small_key<W>(other, merged); })) {
+                                return QubitHamiltonian(std::move(merged), already_compacted);
+                        }
+                }
+
                 const int n1 = static_cast<int>(this->data.size());  // signed for OpenMP 2.0
                 const size_t n2 = other.data.size();
                 std::vector<PauliString<Coeff>> product(static_cast<size_t>(n1) * n2);
@@ -340,12 +349,18 @@ class QubitHamiltonian{
 
 
         QubitHamiltonian compact(){
-                if (data.empty()) return *this;
+                compact_in_place();
+                return *this;
+        }
+
+    private:
+        void compact_in_place() {
+                if (data.empty()) return;
 
                 size_t max_words = 0;
                 for (const auto& ps : data) max_words = std::max(max_words, ps.x.size());
-                if (try_compact_small_key<>(max_words)) {
-                        return *this;
+                if (with_small_key(max_words, [this]<size_t W>() { compact_small_key<W>(); })) {
+                        return;
                 }
 
                 // sort-based compact. Single-pass ordering: by word
@@ -390,11 +405,8 @@ class QubitHamiltonian{
                 data.erase(std::remove_if(data.begin(), data.end(),
                         [](const PauliString<Coeff>& ps) { return coeff_is_zero(ps.coeff); }),
                         data.end());
-
-                return *this;
         }
 
-    private:
         static bool coeff_is_zero(const Coeff& c) {
                 if constexpr (std::is_same_v<Coeff, std::complex<double>>) {
                         return c == std::complex<double>(0.0, 0.0);
@@ -417,24 +429,401 @@ class QubitHamiltonian{
         /// 512 qubits). Beyond this, compact() falls back to the generic sort.
         static constexpr size_t kMaxSmallKeyWords = 8;
 
-        /// Compile-time dispatch: picks the smallest W in {1, 2, 4, ...,
-        /// kMaxSmallKeyWords} that fits max_words and runs compact_small_key<W>.
+        /// Compile-time dispatch: calls f.operator()<W>() for the smallest W in
+        /// {1, 2, 4, ..., kMaxSmallKeyWords} that fits max_words.
         /// Returns false when max_words exceeds the fast-path limit.
-        template<size_t W = 1>
-        bool try_compact_small_key(size_t max_words) {
+        template<size_t W = 1, typename F>
+        static bool with_small_key(size_t max_words, F&& f) {
                 if constexpr (W > kMaxSmallKeyWords) {
                         return false;
                 } else {
                         if (max_words <= W) {
-                                compact_small_key<W>();
+                                f.template operator()<W>();
                                 return true;
                         }
-                        return try_compact_small_key<W * 2>(max_words);
+                        return with_small_key<W * 2>(max_words, std::forward<F>(f));
                 }
+        }
+
+        static size_t max_word_count(const std::vector<PauliString<Coeff>>& a,
+                                     const std::vector<PauliString<Coeff>>& b) {
+                size_t max_words = 0;
+                for (const auto& ps : a) max_words = std::max(max_words, ps.x.size());
+                for (const auto& ps : b) max_words = std::max(max_words, ps.x.size());
+                return max_words;
+        }
+
+        /// Flat, trivially copyable form of a complex-coefficient term.
+        template<size_t W>
+        struct KeyedTerm {
+                uint64_t key[2 * W];
+                double re;
+                double im;
+        };
+
+        template<size_t W>
+        static void set_keyed_term(KeyedTerm<W>& term, const PauliString<Coeff>& ps) {
+                const size_t nw = ps.x.size();
+                for (size_t k = 0; k < W; ++k) {
+                        term.key[k]     = (k < nw) ? ps.x[k] : 0;
+                        term.key[W + k] = (k < nw) ? ps.y[k] : 0;
+                }
+                term.re = ps.coeff.real();
+                term.im = ps.coeff.imag();
+        }
+
+        /// Writes the operator part of a * b to `term` without building a PauliString
+        /// and returns the exponent k of the phase i^k (odd: a and b anti-commute).
+        template<size_t W>
+        static int set_keyed_product_key(KeyedTerm<W>& term, const PauliString<Coeff>& a, const PauliString<Coeff>& b) {
+                const int power_of_i = multiply_symplectic_words(
+                        a.x.data(), a.y.data(), a.x.size(),
+                        b.x.data(), b.y.data(), b.x.size(),
+                        term.key, term.key + W);
+                for (size_t k = std::max(a.x.size(), b.x.size()); k < W; ++k) {
+                        term.key[k] = 0;
+                        term.key[W + k] = 0;
+                }
+                return power_of_i;
+        }
+
+        /// Sets the coefficient of `term` to scale * i^power_of_i * a.coeff * b.coeff.
+        template<size_t W>
+        static void set_keyed_product_coeff(KeyedTerm<W>& term, const PauliString<Coeff>& a, const PauliString<Coeff>& b,
+                                            int power_of_i, double scale) {
+                static constexpr double kRealSign[4] = {1.0, -1.0, -1.0, 1.0};
+                static constexpr double kImagSign[4] = {1.0, 1.0, -1.0, -1.0};
+                const double ar = a.coeff.real(), ai = a.coeff.imag();
+                const double br = b.coeff.real(), bi = b.coeff.imag();
+                const double parts[2] = {ar * br - ai * bi, ar * bi + ai * br};
+                const int k = power_of_i & 3;
+                term.re = scale * kRealSign[k] * parts[k & 1];
+                term.im = scale * kImagSign[k] * parts[(k & 1) ^ 1];
+        }
+
+        /// Below this many terms a range is sorted by insertion, which needs no spare memory.
+        static constexpr size_t kInsertionSortLimit = 32;
+
+        /// Stable MSD radix sort by key, starting at key byte `byte`. The n terms are in
+        /// `src`, `other` is scratch space of the same size, and the result ends up in
+        /// `src` if final_in_src, else in `other`. Levels where all terms share the digit
+        /// move nothing, and the two arrays swap roles per level instead of copying back.
+        /// Stability keeps equal operators in input order, so that adding them rounds the
+        /// same way for any number of threads.
+        template<size_t W>
+        static void radix_sort_keyed(KeyedTerm<W>* src, KeyedTerm<W>* other, size_t n, size_t byte, bool final_in_src) {
+                using Term = KeyedTerm<W>;
+                if (n <= kInsertionSortLimit) {
+                        const auto key_less = [](const Term& a, const Term& b) {
+                                for (size_t k = 0; k < 2 * W; ++k) {
+                                        if (a.key[k] != b.key[k]) return a.key[k] < b.key[k];
+                                }
+                                return false;
+                        };
+                        for (size_t i = 1; i < n; ++i) {
+                                const Term moved = src[i];
+                                size_t j = i;
+                                for (; j > 0 && key_less(moved, src[j - 1]); --j) {
+                                        src[j] = src[j - 1];
+                                }
+                                src[j] = moved;
+                        }
+                        if (!final_in_src) std::copy(src, src + n, other);
+                        return;
+                }
+
+                const auto digit = [](const Term& t, size_t b) {
+                        return static_cast<size_t>((t.key[b / 8] >> (56 - 8 * (b % 8))) & 0xFF);
+                };
+                size_t counts[256];
+                for (;; ++byte) {
+                        if (byte == sizeof(Term::key)) {  // all keys are equal
+                                if (!final_in_src) std::copy(src, src + n, other);
+                                return;
+                        }
+                        std::fill(counts, counts + 256, size_t{0});
+                        for (size_t i = 0; i < n; ++i) ++counts[digit(src[i], byte)];
+                        if (counts[digit(src[0], byte)] != n) break;
+                }
+
+                size_t next[256];
+                size_t position = 0;
+                for (size_t d = 0; d < 256; ++d) {
+                        next[d] = position;
+                        position += counts[d];
+                }
+                for (size_t i = 0; i < n; ++i) {
+                        other[next[digit(src[i], byte)]++] = src[i];
+                }
+                position = 0;
+                for (size_t d = 0; d < 256; ++d) {
+                        if (counts[d] > 0) {
+                                radix_sort_keyed<W>(other + position, src + position, counts[d], byte + 1, !final_in_src);
+                                position += counts[d];
+                        }
+                }
+        }
+
+        /// Sorts the n terms at `first` and adds the coefficients of equal operators.
+        /// The non-zero results are left at `first`; returns how many there are.
+        template<size_t W>
+        static size_t sort_and_merge_keyed(KeyedTerm<W>* first, KeyedTerm<W>* spare, size_t n) {
+                using Term = KeyedTerm<W>;
+                radix_sort_keyed<W>(first, spare, n, 0, true);
+                const auto key_equal = [](const Term& a, const Term& b) {
+                        for (size_t k = 0; k < 2 * W; ++k) {
+                                if (a.key[k] != b.key[k]) return false;
+                        }
+                        return true;
+                };
+                Term* const last = first + n;
+                Term* write = first;
+                for (Term* read = first; read != last;) {
+                        double re = read->re;
+                        double im = read->im;
+                        Term* next = read + 1;
+                        for (; next != last && key_equal(*read, *next); ++next) {
+                                re += next->re;
+                                im += next->im;
+                        }
+                        if (re != 0.0 || im != 0.0) {
+                                if (write != read) *write = *read;
+                                write->re = re;
+                                write->im = im;
+                                ++write;
+                        }
+                        read = next;
+                }
+                return static_cast<size_t>(write - first);
+        }
+
+        /// Writes terms into existing strings, reusing their storage.
+        template<size_t W>
+        static void write_keyed_terms(const KeyedTerm<W>* terms, size_t count, PauliString<Coeff>* out) {
+                for (size_t i = 0; i < count; ++i) {
+                        const KeyedTerm<W>& term = terms[i];
+                        size_t nw = W;
+                        while (nw > 0 && term.key[nw - 1] == 0 && term.key[W + nw - 1] == 0) --nw;
+                        out[i].x.assign(term.key, term.key + nw);
+                        out[i].y.assign(term.key + W, term.key + W + nw);
+                        out[i].coeff = Coeff(term.re, term.im);
+                }
+        }
+
+        /// Sorts `terms` by operator, adds the coefficients of equal operators and
+        /// writes the non-zero results to `out`, ordered by operator. Large inputs
+        /// use a sample sort: regular samples give splitters, every term moves to the
+        /// bucket of its operator, and buckets are then sorted and merged independently.
+        /// Equal operators always share a bucket, so no serial merge step is left.
+        /// The result does not depend on the number of threads. `terms` is overwritten.
+        template<size_t W>
+        static void merge_keyed_terms(KeyedTerm<W>* terms, size_t n, std::vector<PauliString<Coeff>>& out) {
+                using Term = KeyedTerm<W>;
+#ifdef PAULIENGINE_HAS_OPENMP
+                const int nthreads = omp_get_max_threads();
+                if (n >= PAULIENGINE_OMP_THRESHOLD && nthreads > 1) {
+                        const auto key_less = [](const Term& a, const Term& b) {
+                                for (size_t k = 0; k < 2 * W; ++k) {
+                                        if (a.key[k] != b.key[k]) return a.key[k] < b.key[k];
+                                }
+                                return false;
+                        };
+                        constexpr int kBucketsPerThread = 4;  // balances uneven buckets
+                        constexpr size_t kOversampling = 32;
+                        const int n_buckets = kBucketsPerThread * nthreads;
+                        const size_t n_samples = static_cast<size_t>(n_buckets) * kOversampling;
+
+                        std::vector<Term> samples(n_samples);
+                        for (size_t i = 0; i < n_samples; ++i) {
+                                samples[i] = terms[i * (n / n_samples)];
+                        }
+                        std::sort(samples.begin(), samples.end(), key_less);
+                        std::vector<Term> splitters(n_buckets - 1);
+                        for (int b = 0; b + 1 < n_buckets; ++b) {
+                                splitters[b] = samples[(b + 1) * kOversampling];
+                        }
+
+                        std::unique_ptr<uint16_t[]> bucket_of(new uint16_t[n]);
+                        std::vector<size_t> cursor(static_cast<size_t>(nthreads) * n_buckets, 0);
+                        #pragma omp parallel for schedule(static)
+                        for (int t = 0; t < nthreads; ++t) {
+                                size_t* counts = cursor.data() + static_cast<size_t>(t) * n_buckets;
+                                const size_t last = n / nthreads * (t + 1) + (t + 1 == nthreads ? n % nthreads : 0);
+                                for (size_t i = n / nthreads * t; i < last; ++i) {
+                                        const auto b = std::upper_bound(splitters.begin(), splitters.end(), terms[i], key_less)
+                                                - splitters.begin();
+                                        bucket_of[i] = static_cast<uint16_t>(b);
+                                        ++counts[b];
+                                }
+                        }
+
+                        std::vector<size_t> bucket_begin(static_cast<size_t>(n_buckets) + 1, 0);
+                        size_t position = 0;
+                        for (int b = 0; b < n_buckets; ++b) {
+                                bucket_begin[b] = position;
+                                for (int t = 0; t < nthreads; ++t) {
+                                        size_t& entry = cursor[static_cast<size_t>(t) * n_buckets + b];
+                                        const size_t count = entry;
+                                        entry = position;
+                                        position += count;
+                                }
+                        }
+                        bucket_begin[n_buckets] = position;
+
+                        // Chunks are walked in order, so every bucket keeps the input order.
+                        std::unique_ptr<Term[]> partitioned(new Term[n]);
+                        Term* const sorted = partitioned.get();
+                        #pragma omp parallel for schedule(static)
+                        for (int t = 0; t < nthreads; ++t) {
+                                size_t* next = cursor.data() + static_cast<size_t>(t) * n_buckets;
+                                const size_t last = n / nthreads * (t + 1) + (t + 1 == nthreads ? n % nthreads : 0);
+                                for (size_t i = n / nthreads * t; i < last; ++i) {
+                                        sorted[next[bucket_of[i]]++] = terms[i];
+                                }
+                        }
+
+                        std::vector<size_t> kept(n_buckets, 0);
+                        #pragma omp parallel for schedule(dynamic)
+                        for (int b = 0; b < n_buckets; ++b) {
+                                kept[b] = sort_and_merge_keyed<W>(sorted + bucket_begin[b], terms + bucket_begin[b],
+                                                                  bucket_begin[b + 1] - bucket_begin[b]);
+                        }
+
+                        std::vector<size_t> out_begin(static_cast<size_t>(n_buckets) + 1, 0);
+                        for (int b = 0; b < n_buckets; ++b) out_begin[b + 1] = out_begin[b] + kept[b];
+                        reserve_output(out, out_begin[n_buckets]);
+                        out.resize(out_begin[n_buckets]);
+                        #pragma omp parallel for schedule(dynamic)
+                        for (int b = 0; b < n_buckets; ++b) {
+                                write_keyed_terms<W>(sorted + bucket_begin[b], kept[b], out.data() + out_begin[b]);
+                        }
+                        return;
+                }
+#endif
+                std::unique_ptr<Term[]> spare(n > kInsertionSortLimit ? new Term[n] : nullptr);
+                const size_t kept = sort_and_merge_keyed<W>(terms, spare.get(), n);
+                out.resize(kept);
+                write_keyed_terms<W>(terms, kept, out.data());
+        }
+
+#ifdef PAULIENGINE_HAS_OPENMP
+        /// Grows the capacity of `out` and lets all threads fault its pages in. The
+        /// serial resize() afterwards only has to write to memory that is already mapped.
+        static void reserve_output(std::vector<PauliString<Coeff>>& out, size_t total) {
+                if (total <= out.capacity()) return;
+                out.reserve(total);
+                constexpr std::ptrdiff_t kPageSize = 4096;
+                char* const storage = reinterpret_cast<char*>(out.data());
+                const std::ptrdiff_t pages = static_cast<std::ptrdiff_t>(total * sizeof(PauliString<Coeff>)) / kPageSize;
+                #pragma omp parallel for schedule(static)
+                for (std::ptrdiff_t page = 0; page < pages; ++page) {
+                        *static_cast<volatile char*>(storage + page * kPageSize) = 0;
+                }
+        }
+#endif
+
+        template<size_t W>
+        void product_small_key(const QubitHamiltonian& other, std::vector<PauliString<Coeff>>& out) const {
+                const int n1 = static_cast<int>(data.size());  // signed for OpenMP 2.0
+                const size_t n2 = other.data.size();
+                const size_t pairs = static_cast<size_t>(n1) * n2;
+                // new[] leaves the terms untouched, so the threads fault their own pages in.
+                std::unique_ptr<KeyedTerm<W>[]> terms(new KeyedTerm<W>[pairs]);
+                KeyedTerm<W>* const raw = terms.get();
+#ifdef PAULIENGINE_HAS_OPENMP
+                #pragma omp parallel for schedule(static) if(pairs >= PAULIENGINE_OMP_THRESHOLD)
+#endif
+                for (int i = 0; i < n1; ++i) {
+                        const PauliString<Coeff>& a = data[i];
+                        KeyedTerm<W>* const row = raw + static_cast<size_t>(i) * n2;
+                        for (size_t j = 0; j < n2; ++j) {
+                                const PauliString<Coeff>& b = other.data[j];
+                                const int power_of_i = set_keyed_product_key<W>(row[j], a, b);
+                                set_keyed_product_coeff<W>(row[j], a, b, power_of_i, 1.0);
+                        }
+                }
+                merge_keyed_terms<W>(raw, pairs, out);
+        }
+
+        template<size_t W>
+        void commutator_small_key(const QubitHamiltonian& other, std::vector<PauliString<Coeff>>& out) const {
+                const int n1 = static_cast<int>(data.size());  // signed for OpenMP 2.0
+                const size_t n2 = other.data.size();
+                const size_t pairs = static_cast<size_t>(n1) * n2;
+#ifdef PAULIENGINE_HAS_OPENMP
+                const int nthreads = pairs >= PAULIENGINE_OMP_THRESHOLD ? omp_get_max_threads() : 1;
+#else
+                const int nthreads = 1;
+#endif
+                std::vector<std::vector<KeyedTerm<W>>> local(nthreads);
+#ifdef PAULIENGINE_HAS_OPENMP
+                #pragma omp parallel if(nthreads > 1)
+#endif
+                {
+                        // Filled as a local object: the vectors in `local` share cache lines.
+                        std::vector<KeyedTerm<W>> mine;
+                        mine.reserve(pairs / (8 * static_cast<size_t>(nthreads)) + 1);
+#ifdef PAULIENGINE_HAS_OPENMP
+                        #pragma omp for schedule(static)
+#endif
+                        for (int i = 0; i < n1; ++i) {
+                                const PauliString<Coeff>& a = data[i];
+                                for (size_t j = 0; j < n2; ++j) {
+                                        const PauliString<Coeff>& b = other.data[j];
+                                        KeyedTerm<W> term;
+                                        const int power_of_i = set_keyed_product_key<W>(term, a, b);
+                                        if (power_of_i & 1) {  // commuting pairs contribute nothing
+                                                set_keyed_product_coeff<W>(term, a, b, power_of_i, 2.0);
+                                                mine.push_back(term);
+                                        }
+                                }
+                        }
+#ifdef PAULIENGINE_HAS_OPENMP
+                        local[omp_get_thread_num()] = std::move(mine);
+#else
+                        local[0] = std::move(mine);
+#endif
+                }
+
+                if (nthreads == 1) {
+                        merge_keyed_terms<W>(local[0].data(), local[0].size(), out);
+                        return;
+                }
+                std::vector<size_t> offset(nthreads + 1, 0);
+                for (int t = 0; t < nthreads; ++t) offset[t + 1] = offset[t] + local[t].size();
+                std::unique_ptr<KeyedTerm<W>[]> terms(new KeyedTerm<W>[offset[nthreads]]);
+                KeyedTerm<W>* const raw = terms.get();
+#ifdef PAULIENGINE_HAS_OPENMP
+                #pragma omp parallel for schedule(static)
+#endif
+                for (int t = 0; t < nthreads; ++t) {
+                        // A static schedule hands out ascending i, so this is the serial order.
+                        std::copy(local[t].begin(), local[t].end(), raw + offset[t]);
+                        std::vector<KeyedTerm<W>>().swap(local[t]);
+                }
+                merge_keyed_terms<W>(raw, offset[nthreads], out);
         }
 
         template<size_t W>
         void compact_small_key() {
+                if constexpr (std::is_same_v<Coeff, std::complex<double>>) {
+                        const std::ptrdiff_t n = static_cast<std::ptrdiff_t>(data.size());
+                        std::unique_ptr<KeyedTerm<W>[]> terms(new KeyedTerm<W>[data.size()]);
+                        KeyedTerm<W>* const raw = terms.get();
+#ifdef PAULIENGINE_HAS_OPENMP
+                        #pragma omp parallel for schedule(static) if(data.size() >= PAULIENGINE_OMP_THRESHOLD)
+#endif
+                        for (std::ptrdiff_t i = 0; i < n; ++i) {
+                                set_keyed_term<W>(raw[i], data[i]);
+                        }
+                        merge_keyed_terms<W>(raw, data.size(), data);
+                } else {
+                        compact_small_key_symbolic<W>();
+                }
+        }
+
+        template<size_t W>
+        void compact_small_key_symbolic() {
                 struct Entry {
                         uint64_t key[2 * W];
                         uint32_t idx;
@@ -559,6 +948,14 @@ class QubitHamiltonian{
         }
 
         QubitHamiltonian commutator(const QubitHamiltonian& other) const {
+                if constexpr (std::is_same_v<Coeff, std::complex<double>>) {
+                        std::vector<PauliString<Coeff>> merged;
+                        if (with_small_key(max_word_count(data, other.data),
+                                           [&]<size_t W>() { commutator_small_key<W>(other, merged); })) {
+                                return QubitHamiltonian(std::move(merged), already_compacted);
+                        }
+                }
+
                 const int n1 = static_cast<int>(this->data.size()); 
                 const size_t n2 = other.data.size();
                 const size_t pairs = static_cast<size_t>(n1) * n2;

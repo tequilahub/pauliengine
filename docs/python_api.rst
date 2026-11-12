@@ -17,6 +17,8 @@ Pauli strings
 
 .. autoclass:: pauliengine._core.PauliStringSymbolic
 
+.. autoclass:: pauliengine._core.unweighted_pauliString
+
 Qubit Hamiltonians
 ------------------
 
@@ -28,6 +30,8 @@ Qubit Hamiltonians
 .. autoclass:: pauliengine._core.QubitHamiltonianComplex
 
 .. autoclass:: pauliengine._core.QubitHamiltonianSymbolic
+
+.. autoclass:: pauliengine._core.unweighted_QubitHamiltonian
 
 Pauli cycles
 ------------

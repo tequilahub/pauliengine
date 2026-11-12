@@ -13,6 +13,7 @@ the backend: a number gives a numeric string, a string gives a symbolic one.
 
    pe.PauliString(1.0, {0: "Z", 1: "X"})         # dict input
    pe.PauliString(1.0, "X0 Y1 Z2")               # space-separated string input
+   pe.PauliString(1.0, "XIZ")                    # dense string input
    pe.PauliString((1.0, [("X", 0), ("Y", 2)]))   # OpenFermion-style (coeff, list)
    pe.PauliString("a", {0: "X"})                 # symbolic coefficient
 
@@ -21,6 +22,60 @@ Products carry the correct phases of the Pauli algebra:
 .. code-block:: python
 
    pe.PauliString(1.0, {0: "X"}) * pe.PauliString(1.0, {0: "Y"})   # 1j * Z(0)
+
+Without a coefficient ``pe.PauliString`` gives an unweighted string. It only keeps the
+exponent ``k`` of the phase ``i**k`` as an exact integer modulo 4, so its products stay
+unweighted.
+
+.. note::
+
+   Unweighted strings and their sets are meant only as basis elements of a Lie
+   algebra, for example to compute the dynamical Lie algebra of a set of generators.
+   For linear combinations of Pauli strings use weighted strings and Hamiltonians.
+   Give the generators as ``i * P`` (``phase=1``) to keep every element of the closure
+   anti-Hermitian, and collect a basis in ``pe.QubitHamiltonian`` rather than in a
+   Python ``set``: ``hash`` ignores the phase but ``==`` does not, so a ``set`` keeps
+   ``i * Z`` and ``-i * Z`` apart.
+
+``commutator`` is the Lie bracket without the factor 2 of ``[P, Q] = 2 * P * Q``:
+antisymmetric, with the Jacobi identity and an exact phase. It returns ``None`` for
+commuting strings:
+
+.. code-block:: python
+
+   s = pe.PauliString("X") * pe.PauliString("Y")   # +i : Z(0)
+   s.phase                                         # 1
+   s.phase_factor                                  # 1j
+   s.commutator(pe.PauliString("Z"))               # None
+   s * 0.5                                         # 0.5j * Z(0)
+
+A dense string such as ``"XIZ"`` is the fastest input for every coefficient type, because
+it is read in C++ without building a Python dict. A single string is always read as Pauli
+operators, so a symbolic multiple of the identity is ``pe.PauliString("a", {})``.
+
+Next to weighted terms such a string counts with coefficient ``1.0 * i**phase``: in a list
+for ``pe.QubitHamiltonian`` and in ``+``, ``-``, ``*``, ``commutator`` and ``inner_product``
+with any weighted operator (Pauli strings, Hamiltonians, cycles and orbits). The result then
+follows the rules for that weighted operand, for example a ``QubitHamiltonian`` next to a
+cycle. A set of unweighted strings (below) is upgraded in the same way, element by element,
+and a number turns it into a weighted Hamiltonian.
+
+``pe.QubitHamiltonian`` of such strings is an ordered set and not a linear combination:
+every operator occurs once and the first phase seen for it wins, so ``A + A == A``. With a
+single unweighted string, ``+`` adds the string to the set and ``*`` and ``commutator`` act
+on every element; two unweighted strings have no sum. An element keeps its index, so the
+set can serve as a basis. This computes the Lie closure of
+a list of generators:
+
+.. code-block:: python
+
+   generators = [pe.PauliString("ZI", phase=1), pe.PauliString("IZ", phase=1), pe.PauliString("XX", phase=1)]
+   basis = pe.QubitHamiltonian(generators)
+   while True:
+       size = len(basis)
+       basis += basis.commutator(basis)
+       if len(basis) == size:
+           break
 
 Hamiltonians
 ------------
