@@ -4,36 +4,39 @@
 #include <iterator>
 #include <vector>
 
+#include "pauliengine/Coefficients.h"
 #include "pauliengine/PauliString.h"
 #include "pauliengine/QubitHamiltonian.h"
 
 
+template <typename Coeff>
 class PauliCycle;
 
 
 /// A sum of PauliCycles, sum_i data[i]. Each cycle carries its own coefficient
 /// (in its base string); there is no separate global prefactor. The sum is kept
 /// merged: no two summands describe the same rotation orbit, and summands whose
-/// coefficient cancelled to zero are dropped.
+/// coefficient cancelled to zero are dropped. Coeff is std::complex<double> or
+/// SymEngine::Expression.
+template <typename Coeff>
 class PauliCycleSum {
         public:
-                using Coeff = std::complex<double>;
-
                 /// The summands; no two lie in the same rotation orbit.
-                std::vector<PauliCycle> data;
+                std::vector<PauliCycle<Coeff>> data;
 
                 /// The empty sum (zero operator).
                 PauliCycleSum() = default;
 
                 /// Merges summands from the same rotation orbit and drops zeros.
-                explicit PauliCycleSum(std::vector<PauliCycle> cycles);
+                explicit PauliCycleSum(std::vector<PauliCycle<Coeff>> cycles);
 
                 /// Defined out-of-line in PauliCycle.h
                 QubitHamiltonian<Coeff> to_qubit_hamiltonian() const;
 
                 /// Coefficient of the summand in the same rotation orbit as `cycle`
                 /// (its own coefficient is ignored), or 0 if there is none.
-                Coeff contains(const PauliCycle& cycle) const;
+                template <typename C>
+                Coeff contains(const PauliCycle<C>& cycle) const;
 
                 /// Commutator [this, other] = sum_{i,j} [c_i, d_j], merged.
                 PauliCycleSum commutator(const PauliCycleSum& other) const;
@@ -47,7 +50,8 @@ class PauliCycleSum {
 
                 /// Coefficient of `target`'s orbit in [this, other], without building
                 /// the full commutator.
-                Coeff targeted_commutator(const PauliCycleSum& other, const PauliCycle& target) const;
+                template <typename C>
+                Coeff targeted_commutator(const PauliCycleSum& other, const PauliCycle<C>& target) const;
 
                 /// Rewrite every summand's base to the unified representative of its
                 /// orbit (in place). Cheap: the unified forms are already cached by the

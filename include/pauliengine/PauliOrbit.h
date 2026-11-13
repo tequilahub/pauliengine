@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "pauliengine/Coefficients.h"
 #include "pauliengine/PauliString.h"
 #include "pauliengine/QubitHamiltonian.h"
 #include "pauliengine/PauliOrbitSum.h"
@@ -164,9 +165,9 @@ class PauliOrbit {
 
                 /// Commutator [this, other] in the orbit basis (Theorem 1 / Prop. 7),
                 /// via the contingency tables of the two labels; never expands the strings.
-                PauliOrbitSum commutator(const PauliOrbit& other) const {
+                PauliOrbitSum<Coeff> commutator(const PauliOrbit& other) const {
                         require_same_n_qubits(other, "commutator");
-                        PauliOrbitSum out(n_qubits);
+                        PauliOrbitSum<Coeff> out(n_qubits);
                         const int n = n_qubits;
                         const double fn = factorial_table(n)[n];
                         const std::vector<double>& inv = inv_factorial_table(n);
@@ -204,8 +205,8 @@ class PauliOrbit {
 
                 /// scale * this as a PauliOrbitSum, since an orbit has no coefficient of
                 /// its own; scaling by 0 gives the empty sum.
-                PauliOrbitSum operator*(double scale) const {
-                        PauliOrbitSum out(n_qubits);
+                PauliOrbitSum<Coeff> operator*(double scale) const {
+                        PauliOrbitSum<Coeff> out(n_qubits);
                         if (scale != 0.0) {
                                 out.add(*this, Coeff(scale, 0.0));
                         }
@@ -213,12 +214,12 @@ class PauliOrbit {
                 }
 
                 /// scale * this as a PauliOrbitSum.
-                PauliOrbitSum operator*(int scale) const { return *this * static_cast<double>(scale); }
+                PauliOrbitSum<Coeff> operator*(int scale) const { return *this * static_cast<double>(scale); }
 
                 /// Product this * other in the orbit basis (complex coefficients).
-                PauliOrbitSum operator*(const PauliOrbit& other) const {
+                PauliOrbitSum<Coeff> operator*(const PauliOrbit& other) const {
                         require_same_n_qubits(other, "operator*");
-                        PauliOrbitSum out(n_qubits);
+                        PauliOrbitSum<Coeff> out(n_qubits);
                         const int n = n_qubits;
                         const double fn = factorial_table(n)[n];
                         const std::vector<double>& inv = inv_factorial_table(n);
@@ -484,50 +485,55 @@ class PauliOrbit {
 };
 
 
-inline PauliOrbitSum::PauliOrbitSum(int n) : n_qubits(n) {
+template <typename Coeff>
+PauliOrbitSum<Coeff>::PauliOrbitSum(int n) : n_qubits(n) {
         if (n < 0 || n > PauliOrbit::kMaxQubits) {
                 throw std::invalid_argument("PauliOrbitSum: n_qubits must be in [0, "
                         + std::to_string(PauliOrbit::kMaxQubits) + "], got " + std::to_string(n));
         }
 }
 
-inline int PauliOrbitSum::label_key(int p, int q, int r) {
+template <typename Coeff>
+int PauliOrbitSum<Coeff>::label_key(int p, int q, int r) {
         // p, q, r <= kMaxQubits, so this packing is collision-free and fits an int.
         constexpr int base = PauliOrbit::kMaxQubits + 1;
         return (p * base + q) * base + r;
 }
 
-inline void PauliOrbitSum::add(const PauliOrbit& orbit, PauliOrbitSum::Coeff coeff) {
+template <typename Coeff>
+void PauliOrbitSum<Coeff>::add(const PauliOrbit& orbit, Coeff coeff) {
         if (orbit.n_qubits != n_qubits) {
                 throw std::invalid_argument("PauliOrbitSum.add: n_qubits mismatch ("
                         + std::to_string(n_qubits) + " vs " + std::to_string(orbit.n_qubits) + ")");
         }
         const auto [it, inserted] = index_.try_emplace(label_key(orbit.p, orbit.q, orbit.r), data.size());
         if (!inserted) {
-                coeffs[it->second] += coeff;
+                coeffs[it->second] = coeffs[it->second] + coeff;
                 return;
         }
         data.push_back(orbit);
-        coeffs.push_back(coeff);
+        coeffs.push_back(std::move(coeff));
 }
 
-inline PauliOrbitSum::Coeff PauliOrbitSum::contains(const PauliOrbit& orbit) const {
+template <typename Coeff>
+Coeff PauliOrbitSum<Coeff>::contains(const PauliOrbit& orbit) const {
         if (orbit.n_qubits != n_qubits) {
-                return Coeff(0.0, 0.0);
+                return pauliengine_detail::coeff_zero<Coeff>();
         }
         const auto it = index_.find(label_key(orbit.p, orbit.q, orbit.r));
-        return it == index_.end() ? Coeff(0.0, 0.0) : coeffs[it->second];
+        return it == index_.end() ? pauliengine_detail::coeff_zero<Coeff>() : coeffs[it->second];
 }
 
-inline PauliOrbitSum PauliOrbitSum::commutator(const PauliOrbitSum& other) const {
+template <typename Coeff>
+PauliOrbitSum<Coeff> PauliOrbitSum<Coeff>::commutator(const PauliOrbitSum& other) const {
         // [ sum_i a_i B_i , sum_j b_j B_j ] = sum_{i,j} a_i b_j [B_i, B_j].
         PauliOrbitSum result(n_qubits);
         for (size_t i = 0; i < data.size(); ++i) {
                 for (size_t j = 0; j < other.data.size(); ++j) {
-                        const PauliOrbitSum part = data[i].commutator(other.data[j]);
+                        const PauliOrbitSum<std::complex<double>> part = data[i].commutator(other.data[j]);
                         const Coeff scale = coeffs[i] * other.coeffs[j];
                         for (size_t k = 0; k < part.data.size(); ++k) {
-                                result.add(part.data[k], scale * part.coeffs[k]);
+                                result.add(part.data[k], scale * pauliengine_detail::coeff_as<Coeff>(part.coeffs[k]));
                         }
                 }
         }
@@ -535,7 +541,8 @@ inline PauliOrbitSum PauliOrbitSum::commutator(const PauliOrbitSum& other) const
         return result;
 }
 
-inline PauliOrbitSum PauliOrbitSum::operator*(double scale) const {
+template <typename Coeff>
+PauliOrbitSum<Coeff> PauliOrbitSum<Coeff>::operator*(double scale) const {
         if (scale == 0.0) {
                 return PauliOrbitSum(n_qubits);
         }
@@ -546,20 +553,23 @@ inline PauliOrbitSum PauliOrbitSum::operator*(double scale) const {
         return out;
 }
 
-inline PauliOrbitSum operator*(double scale, const PauliOrbit& o) { return o * scale; }
-inline PauliOrbitSum operator*(int scale, const PauliOrbit& o) { return o * scale; }
-inline PauliOrbitSum operator*(double scale, const PauliOrbitSum& s) { return s * scale; }
-inline PauliOrbitSum operator*(int scale, const PauliOrbitSum& s) { return s * scale; }
+inline PauliOrbitSum<std::complex<double>> operator*(double scale, const PauliOrbit& o) { return o * scale; }
+inline PauliOrbitSum<std::complex<double>> operator*(int scale, const PauliOrbit& o) { return o * scale; }
+template <typename Coeff>
+PauliOrbitSum<Coeff> operator*(double scale, const PauliOrbitSum<Coeff>& s) { return s * scale; }
+template <typename Coeff>
+PauliOrbitSum<Coeff> operator*(int scale, const PauliOrbitSum<Coeff>& s) { return s * scale; }
 
-inline PauliOrbitSum PauliOrbitSum::operator*(const PauliOrbitSum& other) const {
+template <typename Coeff>
+PauliOrbitSum<Coeff> PauliOrbitSum<Coeff>::operator*(const PauliOrbitSum& other) const {
         // ( sum_i a_i B_i )( sum_j b_j B_j ) = sum_{i,j} a_i b_j B_i B_j.
         PauliOrbitSum result(n_qubits);
         for (size_t i = 0; i < data.size(); ++i) {
                 for (size_t j = 0; j < other.data.size(); ++j) {
-                        const PauliOrbitSum part = data[i] * other.data[j];
+                        const PauliOrbitSum<std::complex<double>> part = data[i] * other.data[j];
                         const Coeff scale = coeffs[i] * other.coeffs[j];
                         for (size_t k = 0; k < part.data.size(); ++k) {
-                                result.add(part.data[k], scale * part.coeffs[k]);
+                                result.add(part.data[k], scale * pauliengine_detail::coeff_as<Coeff>(part.coeffs[k]));
                         }
                 }
         }
@@ -567,36 +577,37 @@ inline PauliOrbitSum PauliOrbitSum::operator*(const PauliOrbitSum& other) const 
         return result;
 }
 
-inline PauliOrbitSum::Coeff PauliOrbitSum::targeted_commutator(const PauliOrbitSum& other,
-                                                               const PauliOrbit& target) const {
-        Coeff total(0.0, 0.0);
+template <typename Coeff>
+Coeff PauliOrbitSum<Coeff>::targeted_commutator(const PauliOrbitSum& other, const PauliOrbit& target) const {
+        Coeff total = pauliengine_detail::coeff_zero<Coeff>();
         for (size_t i = 0; i < data.size(); ++i) {
                 for (size_t j = 0; j < other.data.size(); ++j) {
-                        total += coeffs[i] * other.coeffs[j]
-                                * data[i].targeted_commutator(other.data[j], target);
+                        total = total + coeffs[i] * other.coeffs[j]
+                                * pauliengine_detail::coeff_as<Coeff>(data[i].targeted_commutator(other.data[j], target));
                 }
         }
         return total;
 }
 
-inline QubitHamiltonian<PauliOrbitSum::Coeff> PauliOrbitSum::to_qubit_hamiltonian() const {
+template <typename Coeff>
+QubitHamiltonian<Coeff> PauliOrbitSum<Coeff>::to_qubit_hamiltonian() const {
         std::vector<PauliString<Coeff>> terms;
         for (size_t k = 0; k < data.size(); ++k) {
-                QubitHamiltonian<Coeff> part = data[k].to_qubit_hamiltonian();
-                for (auto& ps : part.data) {
-                        ps.coeff *= coeffs[k];
-                        terms.push_back(std::move(ps));
+                const QubitHamiltonian<std::complex<double>> part = data[k].to_qubit_hamiltonian();
+                for (const auto& ps : part.terms()) {
+                        terms.emplace_back(ps.x, ps.y, pauliengine_detail::coeff_as<Coeff>(ps.coeff) * coeffs[k]);
                 }
         }
         // different labels never share a string; the constructor only drops zeros
         return QubitHamiltonian<Coeff>(std::move(terms));
 }
 
-inline void PauliOrbitSum::prune_zeros() {
+template <typename Coeff>
+void PauliOrbitSum<Coeff>::prune_zeros() {
         std::vector<PauliOrbit> kept_data;
         std::vector<Coeff> kept_coeffs;
         for (size_t i = 0; i < data.size(); ++i) {
-                if (coeffs[i] != Coeff(0.0, 0.0)) {
+                if (!pauliengine_detail::coeff_is_zero(coeffs[i])) {
                         kept_data.push_back(data[i]);
                         kept_coeffs.push_back(coeffs[i]);
                 }

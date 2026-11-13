@@ -78,7 +78,7 @@ def test_result_types(left, right):
         if left in CYCLES and right in CYCLES:
             assert isinstance(got, _core.PauliCycleSumComplex), op
         elif left in ORBITS and right in ORBITS:
-            assert isinstance(got, _core.PauliOrbitSum), op
+            assert isinstance(got, _core.PauliOrbitSumComplex), op
         elif left == right == "PauliString" and op in ("*", "commutator"):
             assert isinstance(got, _core.PauliStringComplex), op
         else:

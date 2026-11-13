@@ -10,13 +10,15 @@
 #include <unordered_set>
 #include <vector>
 
+#include "pauliengine/Coefficients.h"
 #include "pauliengine/PauliString.h"
 #include "pauliengine/QubitHamiltonian.h"
 #include "pauliengine/PauliCycleSum.h"
 
 
-/// Represents a Pauli string (with a complex coefficient) together with all of
-/// its cyclic rotations on `n_qubits` qubits, i.e. the operator
+/// Represents a Pauli string with a coefficient of type Coeff (std::complex<double>
+/// or SymEngine::Expression) together with all of its cyclic rotations on
+/// `n_qubits` qubits, i.e. the operator
 ///
 ///     C(P) = coeff * sum_{k=0}^{n-1} R^k P        (R = cyclic shift by one qubit)
 ///
@@ -26,10 +28,11 @@
 /// ZZZ on 3 qubits is 3*ZZZ, and that of XIXI on 4 qubits is 2*(XIXI + IXIX).
 /// This is what makes C(P) C(Q) = sum_k C(P R^k Q) hold for every base.
 /// https://arxiv.org/pdf/2604.16701
+template <typename Coeff>
 class PauliCycle {
-        public:
-                using Coeff = std::complex<double>;
+        template <typename> friend class PauliCycle;
 
+        public:
                 /// Fixed at construction: the cached unified form below depends on
                 /// it, so it must not change afterwards (exposed read-only to Python).
                 int n_qubits;
@@ -43,13 +46,14 @@ class PauliCycle {
 
                 /// Cycle of the base {qubit: "X"/"Y"/"Z"} on `qubits` qubits with coefficient `coeff`.
                 /// Throws std::invalid_argument if qubits < 1 or the base acts on a qubit >= qubits.
-                PauliCycle(int qubits, const std::unordered_map<int, std::string>& data, Coeff coeff = Coeff(1.0, 0.0))
+                PauliCycle(int qubits, const std::unordered_map<int, std::string>& data,
+                           Coeff coeff = pauliengine_detail::coeff_one<Coeff>())
                         : n_qubits(qubits), Base(coeff, data) {
                         validate();
                 }
 
                 /// Cycle of a dense base string such as "XIY" (character i acts on qubit i).
-                PauliCycle(int qubits, const std::string& pauli_string, Coeff coeff = Coeff(1.0, 0.0))
+                PauliCycle(int qubits, const std::string& pauli_string, Coeff coeff = pauliengine_detail::coeff_one<Coeff>())
                         : n_qubits(qubits) {
                         Base = PauliString<Coeff>(coeff, pauli_string);
                         validate();
@@ -101,9 +105,10 @@ class PauliCycle {
 
                 /// Orbit-level equality: two cycles are equal iff they describe the
                 /// same rotation orbit. Both sides are unified on demand (cached),
-                /// so no explicit unify() call is required. The coefficient is
-                /// ignored (structural equality of the cycle).
-                bool operator==(const PauliCycle& other) const {
+                /// so no explicit unify() call is required. The coefficient (and its
+                /// type) is ignored (structural equality of the cycle).
+                template <typename C>
+                bool operator==(const PauliCycle<C>& other) const {
                         if (n_qubits != other.n_qubits) {
                                 return false;
                         }
@@ -151,7 +156,8 @@ class PauliCycle {
                 }
 
                 /// Negation of operator==.
-                bool operator!=(const PauliCycle& other) const {
+                template <typename C>
+                bool operator!=(const PauliCycle<C>& other) const {
                         return !(*this == other);
                 }
 
@@ -171,7 +177,7 @@ class PauliCycle {
                 std::vector<uint64_t> get_hash() const {
                         ensure_unified();
                         const std::vector<uint64_t> s =
-                                PauliString<Coeff>(unified_x_, unified_y_, Coeff(1.0, 0.0)).get_hash();
+                                PauliString<Coeff>(unified_x_, unified_y_, pauliengine_detail::coeff_one<Coeff>()).get_hash();
                         std::vector<uint64_t> out(s.size() + 1);
                         out[0] = static_cast<uint64_t>(static_cast<uint32_t>(n_qubits));
                         for (size_t i = 0; i < s.size(); ++i) {
@@ -186,7 +192,8 @@ class PauliCycle {
 
                 /// Inverse of get_hash(): the cycle with that key and the given
                 /// coefficient (its base is the unified representative).
-                static PauliCycle from_hash(const std::vector<uint64_t>& limbs, Coeff coeff = Coeff(1.0, 0.0)) {
+                static PauliCycle from_hash(const std::vector<uint64_t>& limbs,
+                                            Coeff coeff = pauliengine_detail::coeff_one<Coeff>()) {
                         const uint64_t n = limbs.empty() ? 0 : (limbs[0] & 0xFFFFFFFFULL);
                         if (n < 1 || n > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
                                 throw std::invalid_argument("PauliCycle.from_hash: invalid hash (n_qubits = "
@@ -202,7 +209,7 @@ class PauliCycle {
 
                 /// Product C(P) C(Q) = sum_{b=0}^{n-1} C(P R^b Q), as a PauliCycleSum.
                 /// Products that are rotations of each other are merged.
-                PauliCycleSum operator*(const PauliCycle& other) const {
+                PauliCycleSum<Coeff> operator*(const PauliCycle& other) const {
                         require_same_n_qubits(other, "operator*");
                         const int n = this->n_qubits;
                         std::vector<PauliCycle> result;
@@ -210,7 +217,7 @@ class PauliCycle {
                         for (int b = 0; b < n; ++b) {
                                 result.emplace_back(n, this->Base * other.rotate(b));
                         }
-                        return PauliCycleSum(std::move(result));
+                        return PauliCycleSum<Coeff>(std::move(result));
                 }
 
                 /// The cycle with its coefficient multiplied by `scale`.
@@ -226,7 +233,7 @@ class PauliCycle {
                 /// [C(P), C(Q)] = sum_k C([P, R^k Q]) (Eq. 40). Only shifts k at which
                 /// the supports overlap can contribute (Corollary 3); different shifts
                 /// landing in the same rotation orbit are merged by PauliCycleSum.
-                PauliCycleSum commutator(const PauliCycle& other) const {
+                PauliCycleSum<Coeff> commutator(const PauliCycle& other) const {
                         require_same_n_qubits(other, "commutator");
                         std::vector<PauliCycle> result;
                         const int n = this->n_qubits;
@@ -236,11 +243,11 @@ class PauliCycle {
                         for (int k : shifts) {
                                 PauliString<Coeff> term = this->Base.commutator(other.rotate(k));
 
-                                if (term.coeff != Coeff(0.0, 0.0)) {
+                                if (!pauliengine_detail::coeff_is_zero(term.coeff)) {
                                         result.emplace_back(n, term);
                                 }
                         }
-                        return PauliCycleSum(std::move(result));
+                        return PauliCycleSum<Coeff>(std::move(result));
                 }
 
                 /// Coefficient of a single target cycle in [this, other], i.e. the sum
@@ -249,11 +256,12 @@ class PauliCycle {
                 /// shift pruning as commutator() but, instead of constructing and
                 /// merging every output cycle, only accumulates the shifts whose
                 /// product belongs to the target's cyclic class (PauliEngine Features).
-                Coeff targeted_commutator(const PauliCycle& other, const PauliCycle& target) const {
+                template <typename C>
+                Coeff targeted_commutator(const PauliCycle& other, const PauliCycle<C>& target) const {
                         require_same_n_qubits(other, "targeted_commutator");
                         require_same_n_qubits(target, "targeted_commutator");
                         const int n = this->n_qubits;
-                        Coeff total(0.0, 0.0);
+                        Coeff total = pauliengine_detail::coeff_zero<Coeff>();
                         // Rotations preserve the weight, so a product of a different
                         // weight can never lie in the target's orbit; checking that
                         // first skips building and unifying most candidates.
@@ -261,10 +269,10 @@ class PauliCycle {
 
                         for (int k : overlap_shifts(other)) {
                                 PauliString<Coeff> term = this->Base.commutator(other.rotate(k));
-                                if (term.coeff != Coeff(0.0, 0.0) && term.size() == target_weight) {
+                                if (!pauliengine_detail::coeff_is_zero(term.coeff) && term.size() == target_weight) {
                                         // Belongs to the target's cyclic class? (operator== unifies.)
                                         if (PauliCycle(n, term) == target) {
-                                                total += term.coeff;
+                                                total = total + term.coeff;
                                         }
                                 }
                         }
@@ -288,7 +296,8 @@ class PauliCycle {
                         }
                 }
 
-                void require_same_n_qubits(const PauliCycle& other, const char* op) const {
+                template <typename C>
+                void require_same_n_qubits(const PauliCycle<C>& other, const char* op) const {
                         if (other.n_qubits != n_qubits) {
                                 throw std::invalid_argument(std::string("PauliCycle.") + op
                                         + ": n_qubits mismatch (" + std::to_string(n_qubits)
@@ -480,7 +489,8 @@ class PauliCycle {
 };
 
 
-inline QubitHamiltonian<PauliCycleSum::Coeff> PauliCycleSum::to_qubit_hamiltonian() const {
+template <typename Coeff>
+QubitHamiltonian<Coeff> PauliCycleSum<Coeff>::to_qubit_hamiltonian() const {
         std::vector<PauliString<Coeff>> terms;
         for (const auto& cycle : data) {
                 std::vector<PauliString<Coeff>> rots = cycle.rotations();
@@ -491,17 +501,18 @@ inline QubitHamiltonian<PauliCycleSum::Coeff> PauliCycleSum::to_qubit_hamiltonia
         return QubitHamiltonian<Coeff>(std::move(terms));
 }
 
-inline PauliCycleSum::PauliCycleSum(std::vector<PauliCycle> cycles) {
+template <typename Coeff>
+PauliCycleSum<Coeff>::PauliCycleSum(std::vector<PauliCycle<Coeff>> cycles) {
         // Hash-join on the rotation orbit: O(1) per summand instead of a linear
         // scan. The map keys point into `data`; reserving up front guarantees
         // they stay valid (data never grows beyond cycles.size()).
         struct OrbitHash {
-                size_t operator()(const PauliCycle* c) const { return c->hash(); }
+                size_t operator()(const PauliCycle<Coeff>* c) const { return c->hash(); }
         };
         struct OrbitEqual {
-                bool operator()(const PauliCycle* a, const PauliCycle* b) const { return *a == *b; }
+                bool operator()(const PauliCycle<Coeff>* a, const PauliCycle<Coeff>* b) const { return *a == *b; }
         };
-        std::unordered_map<const PauliCycle*, size_t, OrbitHash, OrbitEqual> index;
+        std::unordered_map<const PauliCycle<Coeff>*, size_t, OrbitHash, OrbitEqual> index;
         index.reserve(cycles.size());
         data.reserve(cycles.size());
 
@@ -513,7 +524,8 @@ inline PauliCycleSum::PauliCycleSum(std::vector<PauliCycle> cycles) {
                 }
                 const auto it = index.find(&c);
                 if (it != index.end()) {
-                        data[it->second].Base.coeff += c.Base.coeff;
+                        Coeff& merged = data[it->second].Base.coeff;
+                        merged = merged + c.Base.coeff;
                         continue;
                 }
                 data.push_back(std::move(c));
@@ -523,30 +535,34 @@ inline PauliCycleSum::PauliCycleSum(std::vector<PauliCycle> cycles) {
         // Drop summands whose merged coefficient cancelled to zero.
         data.erase(
                 std::remove_if(data.begin(), data.end(),
-                        [](const PauliCycle& c) { return c.Base.coeff == Coeff(0.0, 0.0); }),
+                        [](const PauliCycle<Coeff>& c) { return pauliengine_detail::coeff_is_zero(c.Base.coeff); }),
                 data.end());
 }
 
-inline void PauliCycleSum::unify() {
+template <typename Coeff>
+void PauliCycleSum<Coeff>::unify() {
         for (auto& c : data) {
                 c.unify();
         }
 }
 
-inline PauliCycleSum::Coeff PauliCycleSum::contains(const PauliCycle& cycle) const {
+template <typename Coeff>
+template <typename C>
+Coeff PauliCycleSum<Coeff>::contains(const PauliCycle<C>& cycle) const {
         // The sum is merged, so at most one summand lies in the cycle's orbit.
         for (const auto& c : data) {
                 if (c == cycle) {
                         return c.Base.coeff;
                 }
         }
-        return Coeff(0.0, 0.0);
+        return pauliengine_detail::coeff_zero<Coeff>();
 }
 
-inline PauliCycleSum PauliCycleSum::commutator(const PauliCycleSum& other) const {
+template <typename Coeff>
+PauliCycleSum<Coeff> PauliCycleSum<Coeff>::commutator(const PauliCycleSum& other) const {
         // [ sum_i c_i , sum_j d_j ] = sum_{i,j} [c_i, d_j]. Each cycle carries its
         // own coefficient, so the pairwise results are collected and merged.
-        std::vector<PauliCycle> combined;
+        std::vector<PauliCycle<Coeff>> combined;
         for (const auto& ci : data) {
                 for (const auto& dj : other.data) {
                         PauliCycleSum part = ci.commutator(dj);
@@ -558,9 +574,10 @@ inline PauliCycleSum PauliCycleSum::commutator(const PauliCycleSum& other) const
         return PauliCycleSum(std::move(combined));
 }
 
-inline PauliCycleSum PauliCycleSum::operator*(const PauliCycleSum& other) const {
+template <typename Coeff>
+PauliCycleSum<Coeff> PauliCycleSum<Coeff>::operator*(const PauliCycleSum& other) const {
         // ( sum_i c_i )( sum_j d_j ) = sum_{i,j} c_i d_j, merged across all pairs.
-        std::vector<PauliCycle> combined;
+        std::vector<PauliCycle<Coeff>> combined;
         for (const auto& ci : data) {
                 for (const auto& dj : other.data) {
                         PauliCycleSum part = ci * dj;
@@ -572,7 +589,8 @@ inline PauliCycleSum PauliCycleSum::operator*(const PauliCycleSum& other) const 
         return PauliCycleSum(std::move(combined));
 }
 
-inline PauliCycleSum PauliCycleSum::operator*(double scale) const {
+template <typename Coeff>
+PauliCycleSum<Coeff> PauliCycleSum<Coeff>::operator*(double scale) const {
         if (scale == 0.0) {
                 return PauliCycleSum();
         }
@@ -583,19 +601,24 @@ inline PauliCycleSum PauliCycleSum::operator*(double scale) const {
         return out;
 }
 
-inline PauliCycle operator*(double scale, const PauliCycle& c) { return c * scale; }
-inline PauliCycle operator*(int scale, const PauliCycle& c) { return c * scale; }
-inline PauliCycleSum operator*(double scale, const PauliCycleSum& s) { return s * scale; }
-inline PauliCycleSum operator*(int scale, const PauliCycleSum& s) { return s * scale; }
+template <typename Coeff>
+PauliCycle<Coeff> operator*(double scale, const PauliCycle<Coeff>& c) { return c * scale; }
+template <typename Coeff>
+PauliCycle<Coeff> operator*(int scale, const PauliCycle<Coeff>& c) { return c * scale; }
+template <typename Coeff>
+PauliCycleSum<Coeff> operator*(double scale, const PauliCycleSum<Coeff>& s) { return s * scale; }
+template <typename Coeff>
+PauliCycleSum<Coeff> operator*(int scale, const PauliCycleSum<Coeff>& s) { return s * scale; }
 
-inline PauliCycleSum::Coeff PauliCycleSum::targeted_commutator(const PauliCycleSum& other,
-                                                               const PauliCycle& target) const {
+template <typename Coeff>
+template <typename C>
+Coeff PauliCycleSum<Coeff>::targeted_commutator(const PauliCycleSum& other, const PauliCycle<C>& target) const {
         // Cycles carry their own coefficient, so the pairwise targeted coefficients
         // are simply summed (no extra scaling).
-        Coeff total(0.0, 0.0);
+        Coeff total = pauliengine_detail::coeff_zero<Coeff>();
         for (const auto& ci : data) {
                 for (const auto& dj : other.data) {
-                        total += ci.targeted_commutator(dj, target);
+                        total = total + ci.targeted_commutator(dj, target);
                 }
         }
         return total;

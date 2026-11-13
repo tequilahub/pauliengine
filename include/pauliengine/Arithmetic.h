@@ -9,7 +9,8 @@
 ///
 /// - Within the cycle family (PauliCycle, PauliCycleSum) the result stays a
 ///   PauliCycleSum, within the orbit family (PauliOrbit, PauliOrbitSum) a
-///   PauliOrbitSum, so nothing is expanded unnecessarily.
+///   PauliOrbitSum, so nothing is expanded unnecessarily. Its coefficients are
+///   symbolic as soon as one operand is symbolic, otherwise complex.
 /// - PauliString * PauliString and its commutator stay a PauliString;
 ///   QubitHamiltonian with QubitHamiltonian of the same coefficient type uses the
 ///   class's own operators.
@@ -53,12 +54,14 @@ const QubitHamiltonian<C>& as_hamiltonian(const QubitHamiltonian<C>& h) {
 }
 
 /// A cycle expanded into the sum of all its rotations.
-inline QubitHamiltonian<std::complex<double>> as_hamiltonian(const PauliCycle& c) {
+template <typename C>
+QubitHamiltonian<C> as_hamiltonian(const PauliCycle<C>& c) {
         return c.to_qubit_hamiltonian();
 }
 
 /// A cycle sum expanded into the sum of all rotations of all summands.
-inline QubitHamiltonian<std::complex<double>> as_hamiltonian(const PauliCycleSum& s) {
+template <typename C>
+QubitHamiltonian<C> as_hamiltonian(const PauliCycleSum<C>& s) {
         return s.to_qubit_hamiltonian();
 }
 
@@ -68,7 +71,8 @@ inline QubitHamiltonian<std::complex<double>> as_hamiltonian(const PauliOrbit& o
 }
 
 /// An orbit sum expanded into all Pauli strings of all its orbits.
-inline QubitHamiltonian<std::complex<double>> as_hamiltonian(const PauliOrbitSum& s) {
+template <typename C>
+QubitHamiltonian<C> as_hamiltonian(const PauliOrbitSum<C>& s) {
         return s.to_qubit_hamiltonian();
 }
 
@@ -97,8 +101,9 @@ QubitHamiltonian<To> convert_coeffs(const QubitHamiltonian<From>& h) {
                 return h;
         } else {
                 std::vector<PauliString<To>> terms;
-                terms.reserve(h.data.size());
-                for (const auto& ps : h.data) {
+                const auto& source = h.terms();
+                terms.reserve(source.size());
+                for (const auto& ps : source) {
                         terms.emplace_back(ps.x, ps.y, To(ps.coeff));
                 }
                 return QubitHamiltonian<To>(std::move(terms), already_compacted);
@@ -115,10 +120,12 @@ template <typename T> inline constexpr bool is_pauli_string = false;
 template <typename C> inline constexpr bool is_pauli_string<PauliString<C>> = true;
 template <typename T> inline constexpr bool is_hamiltonian = false;
 template <typename C> inline constexpr bool is_hamiltonian<QubitHamiltonian<C>> = true;
-template <typename T> inline constexpr bool is_cycle_family =
-        std::is_same_v<T, PauliCycle> || std::is_same_v<T, PauliCycleSum>;
-template <typename T> inline constexpr bool is_orbit_family =
-        std::is_same_v<T, PauliOrbit> || std::is_same_v<T, PauliOrbitSum>;
+template <typename T> inline constexpr bool is_cycle_family = false;
+template <typename C> inline constexpr bool is_cycle_family<PauliCycle<C>> = true;
+template <typename C> inline constexpr bool is_cycle_family<PauliCycleSum<C>> = true;
+template <typename T> inline constexpr bool is_orbit_family = false;
+template <> inline constexpr bool is_orbit_family<PauliOrbit> = true;
+template <typename C> inline constexpr bool is_orbit_family<PauliOrbitSum<C>> = true;
 
 template <typename A, typename B> inline constexpr bool cycle_pair = is_cycle_family<A> && is_cycle_family<B>;
 template <typename A, typename B> inline constexpr bool orbit_pair = is_orbit_family<A> && is_orbit_family<B>;
@@ -132,40 +139,75 @@ template <typename A, typename B> inline constexpr bool native_add =
 template <typename A, typename B> inline constexpr bool native_mul =
         native_add<A, B> || (is_pauli_string<A> && is_pauli_string<B>);
 
-inline PauliCycleSum as_cycle_sum(const PauliCycle& c) { return PauliCycleSum(std::vector<PauliCycle>{c}); }
-inline const PauliCycleSum& as_cycle_sum(const PauliCycleSum& s) { return s; }
+/// A cycle with its coefficient converted to `To`.
+template <typename To, typename From>
+PauliCycle<To> convert_cycle(const PauliCycle<From>& c) {
+        if constexpr (std::is_same_v<To, From>) {
+                return c;
+        } else {
+                return PauliCycle<To>(c.n_qubits, PauliString<To>(c.Base.x, c.Base.y, To(c.Base.coeff)));
+        }
+}
 
-inline PauliOrbitSum as_orbit_sum(const PauliOrbit& o) {
-        PauliOrbitSum s(o.n_qubits);
-        s.add(o, Complex(1.0, 0.0));
+/// A cycle-family operator as a PauliCycleSum with coefficients of type `To`.
+template <typename To, typename C>
+PauliCycleSum<To> as_cycle_sum(const PauliCycle<C>& c) {
+        return PauliCycleSum<To>(std::vector<PauliCycle<To>>{convert_cycle<To>(c)});
+}
+template <typename To, typename C>
+PauliCycleSum<To> as_cycle_sum(const PauliCycleSum<C>& s) {
+        if constexpr (std::is_same_v<To, C>) {
+                return s;
+        } else {
+                PauliCycleSum<To> out;   // the summands are already merged
+                out.data.reserve(s.data.size());
+                for (const auto& c : s.data) out.data.push_back(convert_cycle<To>(c));
+                return out;
+        }
+}
+
+/// An orbit-family operator as a PauliOrbitSum with coefficients of type `To`.
+template <typename To>
+PauliOrbitSum<To> as_orbit_sum(const PauliOrbit& o) {
+        PauliOrbitSum<To> s(o.n_qubits);
+        s.add(o, coeff_one<To>());
         return s;
 }
-inline const PauliOrbitSum& as_orbit_sum(const PauliOrbitSum& s) { return s; }
+template <typename To, typename C>
+PauliOrbitSum<To> as_orbit_sum(const PauliOrbitSum<C>& s) {
+        if constexpr (std::is_same_v<To, C>) {
+                return s;
+        } else {
+                PauliOrbitSum<To> out(s.n_qubits);
+                for (size_t k = 0; k < s.data.size(); ++k) out.add(s.data[k], To(s.coeffs[k]));
+                return out;
+        }
+}
 
 /// a + sign * b within the cycle family; summands of the same orbit are merged.
 template <typename A, typename B>
-PauliCycleSum cycle_combine(const A& a, const B& b, double sign) {
-        const PauliCycleSum& sa = as_cycle_sum(a);   // binds a temporary for a single cycle
-        const PauliCycleSum& sb = as_cycle_sum(b);
-        std::vector<PauliCycle> terms = sa.data;
-        for (PauliCycle c : sb.data) {
-                c.Base.coeff *= sign;
+PauliCycleSum<promoted_coeff_t<A, B>> cycle_combine(const A& a, const B& b, double sign) {
+        using R = promoted_coeff_t<A, B>;
+        std::vector<PauliCycle<R>> terms = as_cycle_sum<R>(a).data;
+        for (PauliCycle<R> c : as_cycle_sum<R>(b).data) {
+                if (sign < 0) c.Base.coeff = coeff_zero<R>() - c.Base.coeff;   // exact, also symbolically
                 terms.push_back(std::move(c));
         }
-        return PauliCycleSum(std::move(terms));
+        return PauliCycleSum<R>(std::move(terms));
 }
 
 /// a + sign * b within the orbit family.
 template <typename A, typename B>
-PauliOrbitSum orbit_combine(const A& a, const B& b, double sign) {
-        PauliOrbitSum out = as_orbit_sum(a);
-        const auto& sb = as_orbit_sum(b);
+PauliOrbitSum<promoted_coeff_t<A, B>> orbit_combine(const A& a, const B& b, double sign) {
+        using R = promoted_coeff_t<A, B>;
+        PauliOrbitSum<R> out = as_orbit_sum<R>(a);
+        const PauliOrbitSum<R> sb = as_orbit_sum<R>(b);
         if (sb.n_qubits != out.n_qubits) {
                 throw std::invalid_argument("PauliOrbitSum: n_qubits mismatch (" + std::to_string(out.n_qubits)
                         + " vs " + std::to_string(sb.n_qubits) + ")");
         }
         for (size_t k = 0; k < sb.data.size(); ++k) {
-                out.add(sb.data[k], sign * sb.coeffs[k]);
+                out.add(sb.data[k], sign < 0 ? coeff_zero<R>() - sb.coeffs[k] : sb.coeffs[k]);
         }
         out.prune_zeros();
         return out;
@@ -180,49 +222,54 @@ concept OperatorLike = requires(const T& t) { as_hamiltonian(t); };
 // ---------------------------------------------------------------------------
 // Same-family operators: stay in the compressed representation
 // ---------------------------------------------------------------------------
+//
+// Coefficients follow the same rule as everywhere: symbolic as soon as one
+// operand is symbolic, otherwise complex.
 
 /// Sum of two cycle-family operators, as a PauliCycleSum.
 template <typename A, typename B>
         requires pauliengine_detail::cycle_pair<A, B>
-PauliCycleSum operator+(const A& a, const B& b) {
+auto operator+(const A& a, const B& b) {
         return pauliengine_detail::cycle_combine(a, b, 1.0);
 }
 
 /// Difference of two cycle-family operators, as a PauliCycleSum.
 template <typename A, typename B>
         requires pauliengine_detail::cycle_pair<A, B>
-PauliCycleSum operator-(const A& a, const B& b) {
+auto operator-(const A& a, const B& b) {
         return pauliengine_detail::cycle_combine(a, b, -1.0);
 }
 
 /// Product of two cycle-family operators, as a PauliCycleSum.
 template <typename A, typename B>
         requires pauliengine_detail::cycle_pair<A, B>
-PauliCycleSum operator*(const A& a, const B& b) {
+auto operator*(const A& a, const B& b) {
         using namespace pauliengine_detail;
-        return as_cycle_sum(a) * as_cycle_sum(b);
+        using R = promoted_coeff_t<A, B>;
+        return as_cycle_sum<R>(a) * as_cycle_sum<R>(b);
 }
 
 /// Sum of two orbit-family operators, as a PauliOrbitSum.
 template <typename A, typename B>
         requires pauliengine_detail::orbit_pair<A, B>
-PauliOrbitSum operator+(const A& a, const B& b) {
+auto operator+(const A& a, const B& b) {
         return pauliengine_detail::orbit_combine(a, b, 1.0);
 }
 
 /// Difference of two orbit-family operators, as a PauliOrbitSum.
 template <typename A, typename B>
         requires pauliengine_detail::orbit_pair<A, B>
-PauliOrbitSum operator-(const A& a, const B& b) {
+auto operator-(const A& a, const B& b) {
         return pauliengine_detail::orbit_combine(a, b, -1.0);
 }
 
 /// Product of two orbit-family operators, as a PauliOrbitSum.
 template <typename A, typename B>
         requires pauliengine_detail::orbit_pair<A, B>
-PauliOrbitSum operator*(const A& a, const B& b) {
+auto operator*(const A& a, const B& b) {
         using namespace pauliengine_detail;
-        return as_orbit_sum(a) * as_orbit_sum(b);
+        using R = promoted_coeff_t<A, B>;
+        return as_orbit_sum<R>(a) * as_orbit_sum<R>(b);
 }
 
 // ---------------------------------------------------------------------------
@@ -263,12 +310,13 @@ template <typename A, typename B>
         requires(OperatorLike<A> && OperatorLike<B>)
 auto commutator(const A& a, const B& b) {
         using namespace pauliengine_detail;
+        using R = promoted_coeff_t<A, B>;
         if constexpr (std::is_same_v<A, B> && requires { a.commutator(b); }) {
                 return a.commutator(b);
         } else if constexpr (cycle_pair<A, B>) {
-                return as_cycle_sum(a).commutator(as_cycle_sum(b));
+                return as_cycle_sum<R>(a).commutator(as_cycle_sum<R>(b));
         } else if constexpr (orbit_pair<A, B>) {
-                return as_orbit_sum(a).commutator(as_orbit_sum(b));
+                return as_orbit_sum<R>(a).commutator(as_orbit_sum<R>(b));
         } else {
                 return lift<A, B>(a).commutator(lift<B, A>(b));
         }
@@ -304,19 +352,21 @@ struct OperatorKeyHash {
 template <typename R, typename CA, typename CB>
 R hamiltonian_inner(const QubitHamiltonian<CA>& a, const QubitHamiltonian<CB>& b) {
         R acc(0);
-        if (a.data.size() <= b.data.size()) {
+        const auto& ta = a.terms();
+        const auto& tb = b.terms();
+        if (ta.size() <= tb.size()) {
                 std::unordered_map<std::vector<uint64_t>, const PauliString<CA>*, OperatorKeyHash> index;
-                index.reserve(a.data.size());
-                for (const auto& p : a.data) index.emplace(p.get_hash(), &p);
-                for (const auto& q : b.data) {
+                index.reserve(ta.size());
+                for (const auto& p : ta) index.emplace(p.get_hash(), &p);
+                for (const auto& q : tb) {
                         const auto it = index.find(q.get_hash());
                         if (it != index.end()) acc = acc + R(conj_coeff(it->second->coeff)) * R(q.coeff);
                 }
         } else {
                 std::unordered_map<std::vector<uint64_t>, const PauliString<CB>*, OperatorKeyHash> index;
-                index.reserve(b.data.size());
-                for (const auto& q : b.data) index.emplace(q.get_hash(), &q);
-                for (const auto& p : a.data) {
+                index.reserve(tb.size());
+                for (const auto& q : tb) index.emplace(q.get_hash(), &q);
+                for (const auto& p : ta) {
                         const auto it = index.find(p.get_hash());
                         if (it != index.end()) acc = acc + R(conj_coeff(p.coeff)) * R(it->second->coeff);
                 }
@@ -341,58 +391,67 @@ StringLabel string_label(const PauliString<C>& s) {
         return l;
 }
 
-/// <orbit sum, H>: the orbit B_{pqr} on n qubits is (i/N) times the sum of all
-/// strings with label (p,q,r) on qubits 0..n-1, so only H's strings with that
-/// label contribute. The orbit is never expanded.
-template <typename R, typename C>
-R orbit_sum_inner(const PauliOrbitSum& a, const QubitHamiltonian<C>& h) {
-        // label -> conj(a_k) * conj(i / N_k) = conj(a_k) * (-i / N_k)
-        std::unordered_map<int, Complex> weight;
+/// <orbit sum, H> (orbit_left) or <H, orbit sum>: the orbit B_{pqr} on n qubits is
+/// (i/N) times the sum of all strings with label (p,q,r) on qubits 0..n-1, so only
+/// H's strings with that label contribute. The orbit is never expanded. Each
+/// direction conjugates its own left operand, so a symbolic result never holds a
+/// conjugate of a conjugate.
+template <typename R, bool orbit_left, typename CA, typename C>
+R orbit_sum_inner(const PauliOrbitSum<CA>& a, const QubitHamiltonian<C>& h) {
+        // label -> coefficient of each of its strings in the orbit sum, conjugated
+        // if the orbit sum is the left operand: a_k * i / N_k or conj(a_k) * (-i / N_k)
+        std::unordered_map<int, R> weight;
         for (size_t k = 0; k < a.data.size(); ++k) {
                 const PauliOrbit& o = a.data[k];
                 const int key = (o.p * (PauliOrbit::kMaxQubits + 1) + o.q) * (PauliOrbit::kMaxQubits + 1) + o.r;
-                weight[key] += std::conj(a.coeffs[k]) * Complex(0.0, -1.0 / o.n_terms());
+                const R w = orbit_left ? R(conj_coeff(a.coeffs[k])) * R(Complex(0.0, -1.0 / o.n_terms()))
+                                       : R(a.coeffs[k]) * R(Complex(0.0, 1.0 / o.n_terms()));
+                const auto [it, inserted] = weight.try_emplace(key, w);
+                if (!inserted) it->second = it->second + w;
         }
         R acc(0);
-        for (const auto& s : h.data) {
+        for (const auto& s : h.terms()) {
                 const StringLabel l = string_label(s);
                 if (l.top >= a.n_qubits) continue;
                 const int key = (l.p * (PauliOrbit::kMaxQubits + 1) + l.q) * (PauliOrbit::kMaxQubits + 1) + l.r;
                 const auto it = weight.find(key);
-                if (it != weight.end()) acc = acc + R(it->second) * R(s.coeff);
+                if (it == weight.end()) continue;
+                acc = acc + (orbit_left ? it->second * R(s.coeff) : R(conj_coeff(s.coeff)) * it->second);
         }
         return acc;
 }
 
 /// <A, B> for two orbit sums (Lemma 1): orbits with equal labels on n_a and n_b
 /// qubits share the N(label; min(n_a, n_b)) strings on the smaller register.
-inline Complex orbit_family_inner(const PauliOrbitSum& a, const PauliOrbitSum& b) {
+template <typename R, typename CA, typename CB>
+R orbit_family_inner(const PauliOrbitSum<CA>& a, const PauliOrbitSum<CB>& b) {
         const int n_min = std::min(a.n_qubits, b.n_qubits);
-        Complex acc(0.0, 0.0);
+        R acc(0);
         for (size_t k = 0; k < a.data.size(); ++k) {
                 const PauliOrbit& oa = a.data[k];
                 if (oa.p + oa.q + oa.r > n_min) continue;      // no common strings
                 const PauliOrbit ob(b.n_qubits, oa.p, oa.q, oa.r);
-                const Complex cb = b.contains(ob);
-                if (cb == Complex(0.0, 0.0)) continue;
+                const CB cb = b.contains(ob);
+                if (coeff_is_zero(cb)) continue;
                 const double shared = PauliOrbit(n_min, oa.p, oa.q, oa.r).n_terms();
                 // conj(i / N_a) * (i / N_b) = 1 / (N_a N_b), times the shared strings
-                acc += std::conj(a.coeffs[k]) * cb * (shared / (oa.n_terms() * ob.n_terms()));
+                acc = acc + R(conj_coeff(a.coeffs[k])) * R(cb) * R(Complex(shared / (oa.n_terms() * ob.n_terms()), 0.0));
         }
         return acc;
 }
 
 /// <A, B> for two cycle sums on the same n: equal orbits give conj(c_P) c_Q n^2 / d.
-inline Complex cycle_family_inner(const PauliCycleSum& a, const PauliCycleSum& b) {
-        std::unordered_map<std::vector<uint64_t>, Complex, OperatorKeyHash> index;
+template <typename R, typename CA, typename CB>
+R cycle_family_inner(const PauliCycleSum<CA>& a, const PauliCycleSum<CB>& b) {
+        std::unordered_map<std::vector<uint64_t>, const CB*, OperatorKeyHash> index;
         index.reserve(b.data.size());
-        for (const auto& c : b.data) index.emplace(c.get_hash(), c.Base.coeff);
-        Complex acc(0.0, 0.0);
+        for (const auto& c : b.data) index.emplace(c.get_hash(), &c.Base.coeff);
+        R acc(0);
         for (const auto& c : a.data) {
                 const auto it = index.find(c.get_hash());
                 if (it == index.end()) continue;
                 const double n = c.n_qubits;
-                acc += std::conj(c.Base.coeff) * it->second * (n * n / c.period());
+                acc = acc + R(conj_coeff(c.Base.coeff)) * R(*it->second) * R(Complex(n * n / c.period(), 0.0));
         }
         return acc;
 }
@@ -412,16 +471,16 @@ pauliengine_detail::inner_t<A, B> inner_product(const A& a, const B& b) {
         using namespace pauliengine_detail;
         using R = inner_t<A, B>;
         if constexpr (orbit_pair<A, B>) {
-                return orbit_family_inner(as_orbit_sum(a), as_orbit_sum(b));
+                return orbit_family_inner<R>(as_orbit_sum<hamiltonian_coeff_t<A>>(a), as_orbit_sum<hamiltonian_coeff_t<B>>(b));
         } else if constexpr (is_orbit_family<A>) {
-                return orbit_sum_inner<R>(as_orbit_sum(a), lift<B, A>(b));
+                return orbit_sum_inner<R, true>(as_orbit_sum<hamiltonian_coeff_t<A>>(a), lift<B, A>(b));
         } else if constexpr (is_orbit_family<B>) {
-                return conj_coeff(orbit_sum_inner<R>(as_orbit_sum(b), lift<A, B>(a)));
+                return orbit_sum_inner<R, false>(as_orbit_sum<hamiltonian_coeff_t<B>>(b), lift<A, B>(a));
         } else if constexpr (cycle_pair<A, B>) {
-                const PauliCycleSum& sa = as_cycle_sum(a);
-                const PauliCycleSum& sb = as_cycle_sum(b);
+                const auto sa = as_cycle_sum<hamiltonian_coeff_t<A>>(a);
+                const auto sb = as_cycle_sum<hamiltonian_coeff_t<B>>(b);
                 if (sa.data.empty() || sb.data.empty()) return R(0);
-                if (sa.data.front().n_qubits == sb.data.front().n_qubits) return cycle_family_inner(sa, sb);
+                if (sa.data.front().n_qubits == sb.data.front().n_qubits) return cycle_family_inner<R>(sa, sb);
                 return hamiltonian_inner<R>(as_hamiltonian(sa), as_hamiltonian(sb));
         } else {
                 return hamiltonian_inner<R>(lift<A, B>(a), lift<B, A>(b));

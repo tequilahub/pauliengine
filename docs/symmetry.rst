@@ -67,6 +67,28 @@ as in the paper. ``n_terms()`` returns :math:`N_\text{terms}`, and
 Orbits are limited to ``n <= PauliOrbit.max_qubits`` (170): the structure
 constants use ``n!`` in double precision.
 
+Symbolic coefficients
+---------------------
+
+Cycles and orbit sums take symbolic coefficients like Pauli strings do: a text
+such as ``"a*b"`` (or an ``Expression``) gives the symbolic class, a number the
+complex one. An orbit has no coefficient of its own; its structure constants
+stay numeric and are multiplied into the symbolic coefficients of a sum.
+
+.. code-block:: python
+
+   x = pe.PauliCycle(6, "XZ", "a")                   # PauliCycleSymbolic
+   y = pe.PauliCycle(6, "YIX", 0.5)                  # PauliCycleComplex
+   x.commutator(y)                                   # PauliCycleSumSymbolic
+
+   o = pe.PauliOrbit(5, 1, 1, 0)
+   s = pe.PauliOrbitSum(5, [(o, "a"), (pe.PauliOrbit(5, 0, 1, 1), 2)])
+   s.commutator(s)                                   # PauliOrbitSumSymbolic
+
+Mixing complex and symbolic operands gives a symbolic result.
+``isinstance(x, pe.PauliCycle)``, ``pe.PauliCycleSum`` and ``pe.PauliOrbitSum``
+accept both kinds.
+
 Hash keys
 ---------
 

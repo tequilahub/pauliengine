@@ -13,6 +13,21 @@ Pauli decomposition of matrices.
 
 ### Added
 
+- **Symbolic coefficients for Pauli cycles and orbit sums**: `PauliCycleSymbolic`,
+  `PauliCycleSumSymbolic` and `PauliOrbitSumSymbolic` next to the complex classes
+  (`PauliCycleComplex`, `PauliCycleSumComplex`, `PauliOrbitSumComplex`).
+  `pe.PauliCycle(4, "XZ", "a")` builds a symbolic cycle, `pe.PauliCycleSum` turns symbolic as soon
+  as one cycle is, and `pe.PauliOrbitSum(n, [(orbit, "a"), ...])` or
+  `pe.PauliOrbitSum(n, symbolic=True)` gives a symbolic orbit sum; `add` also takes a text
+  such as `"a*b"`. `isinstance(x, pe.PauliCycle)` (and likewise for the sums) accepts both
+  kinds. Products, commutators, sums, scaling, `targeted_commutator`, `contains` and inner
+  products work as for complex coefficients; mixing complex and symbolic operands gives a
+  symbolic result, also with Pauli strings and Hamiltonians. A `PauliOrbit` has no
+  coefficient and its structure constants stay numeric. Zero checks of merged symbolic
+  coefficients expand them first, so `x - x` is empty.
+  C++: `PauliCycle<Coeff>`, `PauliCycleSum<Coeff>` and `PauliOrbitSum<Coeff>` are templates
+  like `PauliString<Coeff>`; the Python name of the complex orbit sum class in `_core` is
+  now `PauliOrbitSumComplex`.
 - **Unweighted Pauli strings for Lie algebras**: `pe.PauliString` without a coefficient
   (`pe.PauliString("XIZ")`, `phase=1` for `i * P`) stores only the exponent `k` of the
   phase `i**k` as an exact integer modulo 4. `pe.QubitHamiltonian` of such strings is an
@@ -93,11 +108,27 @@ Pauli decomposition of matrices.
 - `pe.PauliString()`, `pe.PauliString("a")` and other calls without a coefficient no longer
   give a zero string or a symbolic multiple of the identity, see the Pauli strings above.
   Use `pe.PauliString("a", {})` for the latter.
+- `PauliString` takes 80 instead of 104 bytes: `WordVec` stores its size and capacity
+  as 32-bit integers, and the unused C++ member `is_zero` is gone (the Python property
+  `is_zero` is unchanged). Writing the result of large products gets faster.
 - Faster `QubitHamiltonian` product, commutator and compaction for complex
   coefficients on up to 512 qubits: pairs are computed without temporary Pauli
   strings, terms are sorted with a radix sort, and large inputs run through a parallel
   sample sort without a serial merge step. Coefficients of equal operators are added
   in input order, so results no longer depend on the thread count.
+- `QubitHamiltonian` with complex coefficients stores its terms flat: one array of
+  operator words (every term padded to the same width) and one of coefficients,
+  instead of one `PauliString` per term. Products, commutators, sums, differences,
+  scaling and compaction work on these arrays directly; beyond 512 qubits they sort
+  an index instead of whole records. Commutators skip commuting pairs before forming
+  the product. Symbolic Hamiltonians are stored as before.
+  C++ only: the public member `data` is gone. Use `terms()` (all terms as Pauli
+  strings; built on request for complex coefficients), `term(i)` and `size()`.
+  The Python API is unchanged.
+- No OpenMP region is opened for work below the threshold; even an inactive one
+  costs microseconds with libgomp. `PAULIENGINE_OMP_THRESHOLD` now defaults to 4096
+  with MSVC and 32768 with other compilers, counted in records for sorting and in
+  pairs times words for forming products.
 - Constructors no longer copy all terms through the return value of `compact()`.
 - Constructing a `PauliCycle` or `PauliOrbit` validates its input: a base acting
   beyond `n_qubits`, `n_qubits < 1` (cycles), an invalid label or

@@ -33,7 +33,7 @@ class unweighted_QubitHamiltonian {
                 /// The operators of a Hamiltonian with phase 0; its coefficients are dropped.
                 template<typename Coeff>
                 explicit unweighted_QubitHamiltonian(const QubitHamiltonian<Coeff>& hamiltonian) {
-                        for (const auto& term : hamiltonian.data) {
+                        for (const auto& term : hamiltonian.terms()) {
                                 insert(unweighted_pauliString(term));
                         }
                 }

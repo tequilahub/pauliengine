@@ -154,7 +154,7 @@ addopts = [
   "--strict-markers",
   "--strict-config",
 ]
-pythonpath = ["."]
+pythonpath = [".", "tests"]   # tests share helpers, e.g. test_inner_product uses test_arithmetic
 testpaths = ["tests"]
 # required_plugins = ["pytest-datadir"]
 

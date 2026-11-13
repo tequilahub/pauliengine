@@ -237,7 +237,9 @@ message if it is missing.
 The library is a header-only template under `include/pauliengine/`. Both
 `PauliString<Coeff>` and `QubitHamiltonian<Coeff>` work for
 `Coeff = std::complex<double>` and `Coeff = SymEngine::Expression`. Every
-operation exposed in Python is available in C++ with the same name.
+operation exposed in Python is available in C++ with the same name. A
+`QubitHamiltonian` with complex coefficients stores its terms as flat arrays;
+`terms()` returns them as Pauli strings, `term(i)` a single one.
 
 ---
 

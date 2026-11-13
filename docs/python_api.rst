@@ -36,19 +36,36 @@ Qubit Hamiltonians
 Pauli cycles
 ------------
 
-``pauliengine.PauliCycle`` and ``pauliengine.PauliCycleSum`` are aliases of the
-classes below (complex coefficients).
+``pauliengine.PauliCycle`` and ``pauliengine.PauliCycleSum`` build the complex or,
+for a symbolic coefficient such as ``"a*b"``, the symbolic class below;
+``isinstance(x, pauliengine.PauliCycle)`` accepts both.
+
+.. autoclass:: pauliengine.pauli_cycle.PauliCycleFactory
+   :special-members: __call__
 
 .. autoclass:: pauliengine._core.PauliCycleComplex
 
+.. autoclass:: pauliengine._core.PauliCycleSymbolic
+
 .. autoclass:: pauliengine._core.PauliCycleSumComplex
+
+.. autoclass:: pauliengine._core.PauliCycleSumSymbolic
 
 Pauli orbits
 ------------
 
+An orbit has no coefficient of its own. ``pauliengine.PauliOrbitSum`` builds a sum
+with complex or symbolic coefficients; ``isinstance(x, pauliengine.PauliOrbitSum)``
+accepts both.
+
 .. autoclass:: pauliengine.PauliOrbit
 
-.. autoclass:: pauliengine.PauliOrbitSum
+.. autoclass:: pauliengine.pauli_orbit.PauliOrbitSumFactory
+   :special-members: __call__
+
+.. autoclass:: pauliengine._core.PauliOrbitSumComplex
+
+.. autoclass:: pauliengine._core.PauliOrbitSumSymbolic
 
 Functions
 ---------

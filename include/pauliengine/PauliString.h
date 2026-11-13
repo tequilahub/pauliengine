@@ -33,7 +33,8 @@ void testSymengine();
 /// kInlineWords 64-bit words (= 128 qubits) live inline without touching the
 /// heap; longer strings fall back to a single heap allocation. Pauli string
 /// multiplication creates one short-lived string per pair, so avoiding
-/// malloc/free on that path matters.
+/// malloc/free on that path matters. Size and capacity are 32-bit, which keeps
+/// the object at 32 bytes; a sum of millions of strings is written faster.
 class WordVec {
     public:
         static constexpr size_t kInlineWords = 2;
@@ -98,19 +99,20 @@ class WordVec {
 
         /// Grows zero-filled; shrinking never reallocates.
         void resize(size_t n) {
-                if (n > cap_) {
-                        uint64_t* p = new uint64_t[n];
+                const uint32_t m = checked_count(n);
+                if (m > cap_) {
+                        uint64_t* p = new uint64_t[m];
                         for (size_t i = 0; i < size_; ++i) p[i] = ptr_[i];
                         if (ptr_ != buf_) delete[] ptr_;
                         ptr_ = p;
-                        cap_ = n;
+                        cap_ = m;
                 }
-                for (size_t i = size_; i < n; ++i) ptr_[i] = 0;
-                size_ = n;
+                for (size_t i = size_; i < m; ++i) ptr_[i] = 0;
+                size_ = m;
         }
 
         void assign(const uint64_t* first, const uint64_t* last) {
-                const size_t n = static_cast<size_t>(last - first);
+                const uint32_t n = checked_count(static_cast<size_t>(last - first));
                 if (n > cap_) {
                         uint64_t* p = new uint64_t[n];
                         if (ptr_ != buf_) delete[] ptr_;
@@ -133,11 +135,21 @@ class WordVec {
         friend bool operator!=(const WordVec& a, const WordVec& b) { return !(a == b); }
 
     private:
-        size_t size_;
-        size_t cap_;
+        /// A word count as stored; more than 2^32 - 1 words (about 2.7e11 qubits) is refused.
+        static uint32_t checked_count(size_t n) {
+                if (n > UINT32_MAX) {
+                        throw std::length_error("WordVec: more than 2^32 - 1 words");
+                }
+                return static_cast<uint32_t>(n);
+        }
+
+        uint32_t size_;
+        uint32_t cap_;
         uint64_t* ptr_;
         uint64_t buf_[kInlineWords];
 };
+
+static_assert(sizeof(WordVec) == 32, "WordVec should stay at 32 bytes");
 
 
 /// Operator part of the product of two Pauli strings in the symplectic form.
@@ -250,7 +262,6 @@ class PauliString {
                 WordVec x;
                 WordVec y;
                 Coeff coeff{0.0};
-                uint64_t is_zero{true};
                 PauliString() = default;
 
                 PauliString(const std::vector<uint64_t>& x, const std::vector<uint64_t>& y, Coeff coeff) {
