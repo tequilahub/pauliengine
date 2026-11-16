@@ -188,6 +188,42 @@ inline int multiply_symplectic_words(const uint64_t* x1, const uint64_t* y1, siz
         return 2 * std::popcount(c2) - std::popcount(c1);
 }
 
+/// Exponent k of the phase i^k of the product of two Pauli strings, as returned by
+/// multiply_symplectic_words, without writing the product words. Words beyond the
+/// shorter operand act trivially on the other string and contribute no phase.
+inline int symplectic_product_phase(const uint64_t* x1, const uint64_t* y1, size_t n1,
+                                    const uint64_t* x2, const uint64_t* y2, size_t n2) {
+        const size_t n_min = n1 < n2 ? n1 : n2;
+        uint64_t c1 = 0;
+        uint64_t c2 = 0;
+        for (size_t k = 0; k < n_min; k++) {
+                const uint64_t xa = x1[k];
+                const uint64_t ya = y1[k];
+                const uint64_t xb = x2[k];
+                const uint64_t yb = y2[k];
+                const uint64_t x1y2 = xa & yb;
+                const uint64_t anti_commutes = (xb & ya) ^ x1y2;
+                c2 ^= (c1 ^ xa ^ xb ^ ya ^ yb ^ x1y2) & anti_commutes;
+                c1 ^= anti_commutes;
+        }
+        return 2 * std::popcount(c2) - std::popcount(c1);
+}
+
+/// Whether v(a) XOR v(b) == v(c) for operators given by their words; missing words
+/// count as zero, so trimmed and padded representations compare alike.
+inline bool symplectic_xor_equals(const uint64_t* xa, const uint64_t* ya, size_t na,
+                                  const uint64_t* xb, const uint64_t* yb, size_t nb,
+                                  const uint64_t* xc, const uint64_t* yc, size_t nc) {
+        const size_t n = std::max({na, nb, nc});
+        for (size_t k = 0; k < n; k++) {
+                const uint64_t wxa = k < na ? xa[k] : 0, wya = k < na ? ya[k] : 0;
+                const uint64_t wxb = k < nb ? xb[k] : 0, wyb = k < nb ? yb[k] : 0;
+                const uint64_t wxc = k < nc ? xc[k] : 0, wyc = k < nc ? yc[k] : 0;
+                if ((wxa ^ wxb) != wxc || (wya ^ wyb) != wyc) return false;
+        }
+        return true;
+}
+
 /// Sets one operator in the symplectic form, growing the words as needed. Rejects
 /// unknown operators, negative qubits and a qubit that already has an operator.
 inline void set_pauli_bits(WordVec& x, WordVec& y, int qubit, char pauli) {
@@ -572,17 +608,37 @@ class PauliString {
                         return result;
                 }
 
-                /// Coefficient of a single target operator in [this, other]. Since the
-                /// commutator of two Pauli strings is at most one term (2*PQ up to phase,
-                /// or 0), this just checks whether that term's operator matches `target`
-                /// and returns its coefficient, else 0. Same O(n) cost as the full
-                /// commutator (per PauliEngine Features) — provided for API uniformity.
+                /// Coefficient of a single target operator in [this, other]. The
+                /// commutator of two Pauli strings is at most one term, 2*PQ or 0, so this
+                /// has the same O(n) cost as the full commutator; it only skips forming
+                /// the product words: the XOR rule decides whether PQ can be `target`,
+                /// and a single phase pass gives both the commutation parity and i^k.
                 Coeff targeted_commutator(const PauliString& other, const PauliString& target) const {
-                        const PauliString c = this->commutator(other);
-                        if (c.x == target.x && c.y == target.y) {
-                                return c.coeff;
+                        if (!symplectic_xor_equals(x.data(), y.data(), x.size(),
+                                                   other.x.data(), other.y.data(), other.x.size(),
+                                                   target.x.data(), target.y.data(), target.x.size())) {
+                                return Coeff(0.0);
                         }
-                        return Coeff(0.0);
+                        const int power_of_i = symplectic_product_phase(
+                                x.data(), y.data(), x.size(),
+                                other.x.data(), other.y.data(), other.x.size());
+                        if ((power_of_i & 1) == 0) {
+                                return Coeff(0.0);  // the strings commute
+                        }
+                        return commutator_coeff(this->coeff, other.coeff, power_of_i);
+                }
+
+                /// Coefficient 2 * i^k * a * b of the commutator term of two
+                /// anti-commuting strings with coefficients a, b and product phase i^k.
+                static Coeff commutator_coeff(const Coeff& a, const Coeff& b, int power_of_i) {
+                        Coeff c = a * b;
+                        if (power_of_i & 1) {
+                                c *= std::complex<double>(0.0, 1.0);
+                        }
+                        if (power_of_i & 2) {
+                                c = -c;
+                        }
+                        return c * 2.0;
                 }
 
                 Coeff get_coeff() const {

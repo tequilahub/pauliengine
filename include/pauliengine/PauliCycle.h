@@ -31,6 +31,7 @@
 template <typename Coeff>
 class PauliCycle {
         template <typename> friend class PauliCycle;
+        template <typename> friend class PauliCycleSum;
 
         public:
                 /// Fixed at construction: the cached unified form below depends on
@@ -256,25 +257,50 @@ class PauliCycle {
                 /// shift pruning as commutator() but, instead of constructing and
                 /// merging every output cycle, only accumulates the shifts whose
                 /// product belongs to the target's cyclic class (PauliEngine Features).
+                /// Per shift, the operator of P R^k Q is the XOR of the words; its weight
+                /// is checked first (rotations preserve it), then one phase pass gives
+                /// the commutation parity and i^k, and only the remaining candidates
+                /// are unified and compared with the target. No product string, rotated
+                /// cycle or coefficient is formed for a shift that cannot contribute.
                 template <typename C>
                 Coeff targeted_commutator(const PauliCycle& other, const PauliCycle<C>& target) const {
                         require_same_n_qubits(other, "targeted_commutator");
                         require_same_n_qubits(target, "targeted_commutator");
                         const int n = this->n_qubits;
+                        const size_t nw = n_words();
                         Coeff total = pauliengine_detail::coeff_zero<Coeff>();
-                        // Rotations preserve the weight, so a product of a different
-                        // weight can never lie in the target's orbit; checking that
-                        // first skips building and unifying most candidates.
                         const size_t target_weight = target.Base.size();
+                        target.ensure_unified();
 
+                        WordVec cx(nw), cy(nw), ux, uy;
                         for (int k : overlap_shifts(other)) {
-                                PauliString<Coeff> term = this->Base.commutator(other.rotate(k));
-                                if (!pauliengine_detail::coeff_is_zero(term.coeff) && term.size() == target_weight) {
-                                        // Belongs to the target's cyclic class? (operator== unifies.)
-                                        if (PauliCycle(n, term) == target) {
-                                                total = total + term.coeff;
-                                        }
+                                const WordVec rx = rotate_words(other.Base.x, n, k);
+                                const WordVec ry = rotate_words(other.Base.y, n, k);
+                                // Operator of the product and its weight in one pass.
+                                size_t weight = 0;
+                                for (size_t w = 0; w < nw; ++w) {
+                                        const uint64_t bx = w < Base.x.size() ? Base.x[w] : 0ULL;
+                                        const uint64_t by = w < Base.y.size() ? Base.y[w] : 0ULL;
+                                        cx[w] = bx ^ rx[w];
+                                        cy[w] = by ^ ry[w];
+                                        weight += static_cast<size_t>(std::popcount(cx[w] | cy[w]));
                                 }
+                                if (weight != target_weight) {
+                                        continue;
+                                }
+                                const int power_of_i = symplectic_product_phase(
+                                        Base.x.data(), Base.y.data(), Base.x.size(),
+                                        rx.data(), ry.data(), nw);
+                                if ((power_of_i & 1) == 0) {
+                                        continue;  // commuting: no commutator term
+                                }
+                                unify_words(cx, cy, n, ux, uy);
+                                if (cmp_words(ux, target.unified_x_, nw) != 0
+                                    || cmp_words(uy, target.unified_y_, nw) != 0) {
+                                        continue;
+                                }
+                                total = total + PauliString<Coeff>::commutator_coeff(
+                                        Base.coeff, other.Base.coeff, power_of_i);
                         }
                         return total;
                 }
@@ -349,19 +375,28 @@ class PauliCycle {
                         if (unified_valid_) {
                                 return;
                         }
-                        const int n = n_qubits;
-                        unified_x_ = WordVec(n_words());
-                        unified_y_ = WordVec(n_words());
+                        unify_words(Base.x, Base.y, n_qubits, unified_x_, unified_y_);
+                        unified_valid_ = true;
+                }
 
-                        const std::vector<int> pos = support(Base);
+                /// Unified representative (ux, uy) of the rotation orbit of the operator
+                /// (x, y) on n qubits, with exactly ceil(n / 64) words each; see
+                /// ensure_unified(). Two operators lie in the same orbit iff their
+                /// unified words are equal.
+                static void unify_words(const WordVec& x, const WordVec& y, int n, WordVec& ux, WordVec& uy) {
+                        const size_t nw = (static_cast<size_t>(n) + BITS_IN_INTEGER - 1) / BITS_IN_INTEGER;
+                        ux = WordVec(nw);
+                        uy = WordVec(nw);
+
+                        const std::vector<int> pos = support_words(x, y);
                         const size_t w = pos.size();
                         if (w > 0) {
                                 // item = gap << 2 | pauli, with pauli = x_bit | y_bit << 1
                                 std::vector<uint64_t> items(w);
                                 for (size_t i = 0; i < w; ++i) {
                                         const int gap = (i + 1 < w ? pos[i + 1] : pos[0] + n) - pos[i];
-                                        const uint64_t pauli = (bit_at(Base.x, pos[i]) ? 1ULL : 0ULL)
-                                                | (bit_at(Base.y, pos[i]) ? 2ULL : 0ULL);
+                                        const uint64_t pauli = (bit_at(x, pos[i]) ? 1ULL : 0ULL)
+                                                | (bit_at(y, pos[i]) ? 2ULL : 0ULL);
                                         items[i] = (static_cast<uint64_t>(gap) << 2) | pauli;
                                 }
                                 const size_t start = least_rotation(items);
@@ -369,15 +404,22 @@ class PauliCycle {
                                 for (size_t t = 0; t < w; ++t) {
                                         const uint64_t item = items[(start + t) % w];
                                         if (item & 1ULL) {
-                                                set_bit(unified_x_, q);
+                                                set_bit(ux, q);
                                         }
                                         if (item & 2ULL) {
-                                                set_bit(unified_y_, q);
+                                                set_bit(uy, q);
                                         }
                                         q += static_cast<int>(item >> 2);
                                 }
                         }
-                        unified_valid_ = true;
+                }
+
+                /// Hash of unified words, so that operators of the same orbit collide.
+                static size_t hash_unified(const WordVec& ux, const WordVec& uy) {
+                        size_t h = 0xcbf29ce484222325ULL;
+                        mix_words(h, ux);
+                        mix_words(h, uy);
+                        return h;
                 }
 
                 /// Start index of the lexicographically least rotation of s, O(|s|)
@@ -462,9 +504,14 @@ class PauliCycle {
                 }
 
                 static std::vector<int> support(const PauliString<Coeff>& ps) {
+                        return support_words(ps.x, ps.y);
+                }
+
+                static std::vector<int> support_words(const WordVec& x, const WordVec& y) {
                         std::vector<int> out;
-                        for (size_t w = 0; w < ps.x.size(); ++w) {
-                                uint64_t bits = ps.x[w] | ps.y[w];
+                        const size_t nw = std::min(x.size(), y.size());
+                        for (size_t w = 0; w < nw; ++w) {
+                                uint64_t bits = x[w] | y[w];
                                 while (bits) {
                                         const int bit = std::countr_zero(bits);
                                         out.push_back(static_cast<int>(w * BITS_IN_INTEGER + bit));
@@ -616,9 +663,96 @@ Coeff PauliCycleSum<Coeff>::targeted_commutator(const PauliCycleSum& other, cons
         // Cycles carry their own coefficient, so the pairwise targeted coefficients
         // are simply summed (no extra scaling).
         Coeff total = pauliengine_detail::coeff_zero<Coeff>();
-        for (const auto& ci : data) {
-                for (const auto& dj : other.data) {
-                        total = total + ci.targeted_commutator(dj, target);
+        if (data.empty() || other.data.empty()) {
+                return total;
+        }
+        // All summands of a sum share n_qubits, so checking one pair suffices.
+        data.front().require_same_n_qubits(other.data.front(), "targeted_commutator");
+        data.front().require_same_n_qubits(target, "targeted_commutator");
+
+        // XOR rule on rotation orbits: the pair (P, Q) can contribute only if
+        // P R^k Q = R^m T for some shifts k, m, i.e. R^k Q = P XOR R^m T. Hence the
+        // orbit of Q is the orbit of P XOR R^m T for one of the d_T distinct
+        // rotations of the target (and symmetrically with the roles swapped).
+        // Traverse the smaller sum, index the larger one by unified orbit, and
+        // evaluate only the pairs found. If the target has more distinct rotations
+        // than the larger sum has summands, the lookups would cost more than the
+        // plain pair scan, which is used instead.
+        const bool iter_this = data.size() <= other.data.size();
+        const std::vector<PauliCycle<Coeff>>& outer = iter_this ? data : other.data;
+        const std::vector<PauliCycle<Coeff>>& inner = iter_this ? other.data : data;
+        const int n = target.n_qubits;
+        const int d_target = target.period();
+        const auto pair_value = [&](size_t i, size_t j) {
+                return iter_this ? outer[i].targeted_commutator(inner[j], target)
+                                 : inner[j].targeted_commutator(outer[i], target);
+        };
+
+        if (static_cast<size_t>(d_target) > inner.size()) {
+                for (size_t i = 0; i < outer.size(); ++i) {
+                        for (size_t j = 0; j < inner.size(); ++j) {
+                                total = total + pair_value(i, j);
+                        }
+                }
+                return total;
+        }
+
+        // Index of `inner` by unified orbit; the sum is merged, so each orbit
+        // occurs at most once, but hash collisions are chained.
+        constexpr uint32_t kNone = static_cast<uint32_t>(-1);
+        std::unordered_map<size_t, uint32_t> head;
+        head.reserve(inner.size());
+        std::vector<uint32_t> next(inner.size(), kNone);
+        for (size_t j = 0; j < inner.size(); ++j) {
+                inner[j].ensure_unified();
+                const size_t h = PauliCycle<Coeff>::hash_unified(inner[j].unified_x_, inner[j].unified_y_);
+                const auto [it, inserted] = head.try_emplace(h, static_cast<uint32_t>(j));
+                if (!inserted) {
+                        next[j] = it->second;
+                        it->second = static_cast<uint32_t>(j);
+                }
+        }
+
+        // The d_T distinct rotations of the target.
+        const size_t nw = (static_cast<size_t>(n) + BITS_IN_INTEGER - 1) / BITS_IN_INTEGER;
+        std::vector<WordVec> rot_x, rot_y;
+        rot_x.reserve(d_target);
+        rot_y.reserve(d_target);
+        for (int m = 0; m < d_target; ++m) {
+                rot_x.push_back(PauliCycle<C>::rotate_words(target.Base.x, n, m));
+                rot_y.push_back(PauliCycle<C>::rotate_words(target.Base.y, n, m));
+        }
+
+        // Partners of the current outer summand; `stamp` deduplicates them.
+        std::vector<size_t> stamp(inner.size(), static_cast<size_t>(-1));
+        std::vector<uint32_t> partners;
+        WordVec cx(nw), cy(nw), ux, uy;
+        for (size_t i = 0; i < outer.size(); ++i) {
+                const PauliString<Coeff>& p = outer[i].Base;
+                partners.clear();
+                for (int m = 0; m < d_target; ++m) {
+                        for (size_t w = 0; w < nw; ++w) {
+                                cx[w] = (w < p.x.size() ? p.x[w] : 0ULL) ^ rot_x[m][w];
+                                cy[w] = (w < p.y.size() ? p.y[w] : 0ULL) ^ rot_y[m][w];
+                        }
+                        PauliCycle<Coeff>::unify_words(cx, cy, n, ux, uy);
+                        const auto bucket = head.find(PauliCycle<Coeff>::hash_unified(ux, uy));
+                        if (bucket == head.end()) {
+                                continue;
+                        }
+                        for (uint32_t j = bucket->second; j != kNone; j = next[j]) {
+                                if (stamp[j] == i) {
+                                        continue;
+                                }
+                                if (PauliCycle<Coeff>::cmp_words(ux, inner[j].unified_x_, nw) == 0
+                                    && PauliCycle<Coeff>::cmp_words(uy, inner[j].unified_y_, nw) == 0) {
+                                        stamp[j] = i;
+                                        partners.push_back(j);
+                                }
+                        }
+                }
+                for (uint32_t j : partners) {
+                        total = total + pair_value(i, j);
                 }
         }
         return total;

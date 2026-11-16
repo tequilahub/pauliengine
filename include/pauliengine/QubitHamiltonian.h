@@ -459,39 +459,74 @@ class QubitHamiltonian{
         /// namely v(Q) = v(P) XOR v(R) (equivalently Q ∝ P·R). We hash one side by
         /// its operator signature and, for each term of the other side, look up the
         /// unique matching partner, accumulating the commutator coefficient of the
-        /// target. Cost O(min(|A|,|B|)) lookups after building the map.
+        /// target. Cost O(min(|A|,|B|) L) expected word operations for the lookups
+        /// plus O(max(|A|,|B|) L) for building the index, where L is the number of
+        /// words per string. Works on the stored terms directly: the candidate
+        /// operator is a plain XOR of words, and one phase pass per found partner
+        /// gives both the commutation parity and i^k, without forming the product.
         Coeff targeted_commutator(const QubitHamiltonian& other,
                                   const PauliString<Coeff>& target) const {
-                using Map = std::unordered_map<PauliString<Coeff>, const PauliString<Coeff>*,
-                        PauliStringHash<Coeff>, PauliStringOperatorEqual<Coeff>>;
                 Coeff total(0.0);
 
-                // Iterate the smaller side; hash the larger one (keyed by operator).
+                // Iterate the smaller side; index the larger one by operator.
                 const bool iter_this = size() <= other.size();
-                const auto& these = terms();
-                const auto& those = other.terms();
-                const std::vector<PauliString<Coeff>>& outer = iter_this ? these : those;
-                const std::vector<PauliString<Coeff>>& inner = iter_this ? those : these;
+                const QubitHamiltonian& outer = iter_this ? *this : other;
+                const QubitHamiltonian& inner = iter_this ? other : *this;
+                const size_t n_inner = inner.size();
+                if (n_inner == 0 || outer.size() == 0) return total;
 
-                Map lut;
-                lut.reserve(inner.size());
-                for (const auto& term : inner) {
-                        lut.emplace(term, &term);
+                // Hash index over the operators of `inner`: buckets keyed by the hash
+                // of the trimmed words, chained through `next`.
+                constexpr uint32_t kNone = static_cast<uint32_t>(-1);
+                std::unordered_map<size_t, uint32_t> head;
+                head.reserve(n_inner);
+                std::vector<uint32_t> next(n_inner, kNone);
+                for (size_t j = 0; j < n_inner; ++j) {
+                        const OperatorWords q = inner.operator_words(j);
+                        const auto [it, inserted] = head.try_emplace(hash_words(q.x, q.y, q.nw), static_cast<uint32_t>(j));
+                        if (!inserted) {
+                                next[j] = it->second;
+                                it->second = static_cast<uint32_t>(j);
+                        }
                 }
 
-                for (const auto& t : outer) {
-                        // Operator of the unique partner that can produce `target`.
-                        const PauliString<Coeff> partner_op = t * target;
-                        const auto it = lut.find(partner_op);
-                        if (it == lut.end()) {
-                                continue;
+                const size_t nr = target.x.size();
+                std::vector<uint64_t> cand;
+                for (size_t i = 0; i < outer.size(); ++i) {
+                        const OperatorWords p = outer.operator_words(i);
+                        // Operator of the unique partner that can produce `target`:
+                        // v(Q) = v(P) XOR v(R), trimmed of trailing zero words.
+                        size_t nc = std::max(p.nw, nr);
+                        cand.assign(2 * nc, 0);
+                        for (size_t k = 0; k < nc; ++k) {
+                                cand[k]      = (k < p.nw ? p.x[k] : 0) ^ (k < nr ? target.x[k] : 0);
+                                cand[nc + k] = (k < p.nw ? p.y[k] : 0) ^ (k < nr ? target.y[k] : 0);
                         }
-                        // Preserve the [this, other] ordering (the commutator is
-                        // antisymmetric): the term from `this` is always the left factor.
-                        const PauliString<Coeff> c = iter_this
-                                ? t.commutator(*it->second)
-                                : it->second->commutator(t);
-                        total = total + c.coeff;
+                        const uint64_t* cx = cand.data();
+                        const uint64_t* cy = cand.data() + nc;
+                        while (nc > 0 && cx[nc - 1] == 0 && cy[nc - 1] == 0) --nc;
+
+                        const auto bucket = head.find(hash_words(cx, cy, nc));
+                        if (bucket == head.end()) continue;
+                        for (uint32_t j = bucket->second; j != kNone; j = next[j]) {
+                                const OperatorWords q = inner.operator_words(j);
+                                if (q.nw != nc || !std::equal(cx, cx + nc, q.x) || !std::equal(cy, cy + nc, q.y)) {
+                                        continue;
+                                }
+                                // Preserve the [this, other] ordering (the commutator is
+                                // antisymmetric): the term from `this` is the left factor.
+                                const OperatorWords& left = iter_this ? p : q;
+                                const OperatorWords& right = iter_this ? q : p;
+                                const int power_of_i = symplectic_product_phase(
+                                        left.x, left.y, left.nw, right.x, right.y, right.nw);
+                                if (power_of_i & 1) {  // anti-commuting pair
+                                        const size_t li = iter_this ? i : j;
+                                        const size_t ri = iter_this ? j : i;
+                                        total = total + PauliString<Coeff>::commutator_coeff(
+                                                term_coeff(li), other.term_coeff(ri), power_of_i);
+                                }
+                                break;  // operators are unique within a compacted sum
+                        }
                 }
                 return total;
         }
@@ -923,6 +958,41 @@ class QubitHamiltonian{
         }
 
     private:
+        /// Operator part of a stored term, trimmed of trailing zero words.
+        struct OperatorWords {
+                const uint64_t* x;
+                const uint64_t* y;
+                size_t nw;
+        };
+
+        OperatorWords operator_words(size_t i) const {
+                if constexpr (kFlat) {
+                        return {store_.x(i), store_.y(i), store_.used_words(i)};
+                } else {
+                        const PauliString<Coeff>& ps = store_[i];
+                        return {ps.x.data(), ps.y.data(), ps.x.size()};
+                }
+        }
+
+        Coeff term_coeff(size_t i) const {
+                if constexpr (kFlat) {
+                        return store_.coeff(i);
+                } else {
+                        return store_[i].coeff;
+                }
+        }
+
+        /// Hash of an operator given by its trimmed words.
+        static size_t hash_words(const uint64_t* x, const uint64_t* y, size_t nw) {
+                size_t h = 0xcbf29ce484222325ULL ^ nw;
+                const auto mix = [&h](uint64_t w) {
+                        h ^= std::hash<uint64_t>{}(w) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+                };
+                for (size_t k = 0; k < nw; ++k) mix(x[k]);
+                for (size_t k = 0; k < nw; ++k) mix(y[k]);
+                return h;
+        }
+
         static std::vector<PauliString<Coeff>> strings_of(const Hamiltonian_structure<Coeff>& data) {
                 std::vector<PauliString<Coeff>> strings;
                 strings.reserve(data.size());
