@@ -125,6 +125,14 @@ Pauli decomposition of matrices.
   C++ only: the public member `data` is gone. Use `terms()` (all terms as Pauli
   strings; built on request for complex coefficients), `term(i)` and `size()`.
   The Python API is unchanged.
+- `h * h`, `h ** n` (`power`) and the new C++ method `square()` compute the square of a
+  `QubitHamiltonian` from the pairs i < j only: `P_i P_j` and `P_j P_i` are equal for
+  commuting strings and cancel for anti-commuting ones, so
+  `H^2 = (sum a_i^2) I + 2 sum_{i<j, commuting} a_i a_j P_i P_j`. About a quarter of the
+  records of the general product remain; measured 2 to 4 times faster (about 2 times for
+  local strings, which commute more often). Anti-commuting pairs no longer leave rounding
+  residues of order 1e-16, and the result is the same for any number of threads. The
+  general path is taken when the two operands are different objects.
 - No OpenMP region is opened for work below the threshold; even an inactive one
   costs microseconds with libgomp. `PAULIENGINE_OMP_THRESHOLD` now defaults to 4096
   with MSVC and 32768 with other compilers, counted in records for sorting and in

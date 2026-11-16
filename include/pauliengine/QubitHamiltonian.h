@@ -83,6 +83,23 @@ inline void for_each_index(size_t n, bool parallel, F&& f) {
         for (std::ptrdiff_t i = 0; i < count; ++i) f(static_cast<size_t>(i));
 }
 
+/// Like for_each_index, but hands out the indices in small chunks on demand, for
+/// iterations of very different cost.
+template<typename F>
+inline void for_each_index_dynamic(size_t n, bool parallel, F&& f) {
+        const std::ptrdiff_t count = static_cast<std::ptrdiff_t>(n);  // signed for OpenMP 2.0
+#ifdef PAULIENGINE_HAS_OPENMP
+        if (parallel) {
+                #pragma omp parallel for schedule(dynamic, 16)
+                for (std::ptrdiff_t i = 0; i < count; ++i) f(static_cast<size_t>(i));
+                return;
+        }
+#else
+        (void)parallel;
+#endif
+        for (std::ptrdiff_t i = 0; i < count; ++i) f(static_cast<size_t>(i));
+}
+
 /// One term with a complex coefficient, read from a string or from flat storage.
 /// x and y hold nw words each.
 struct TermView {
@@ -108,12 +125,18 @@ inline std::complex<double> product_coeff(std::complex<double> a, std::complex<d
 }
 
 /// Whether two strings anti-commute: the symplectic product has odd parity. Much
-/// cheaper than forming the product, which a commutator needs only for these pairs.
-inline bool anticommute(const TermView& a, const TermView& b) {
-        const size_t n = std::min(a.nw, b.nw);
+/// cheaper than forming the product, which a commutator needs only for these pairs
+/// and a square only for the others.
+inline bool anticommute_words(const uint64_t* x1, const uint64_t* y1, size_t n1,
+                              const uint64_t* x2, const uint64_t* y2, size_t n2) {
+        const size_t n = std::min(n1, n2);
         uint64_t anti = 0;
-        for (size_t k = 0; k < n; ++k) anti ^= (a.x[k] & b.y[k]) ^ (b.x[k] & a.y[k]);
+        for (size_t k = 0; k < n; ++k) anti ^= (x1[k] & y2[k]) ^ (x2[k] & y1[k]);
         return std::popcount(anti) & 1;
+}
+
+inline bool anticommute(const TermView& a, const TermView& b) {
+        return anticommute_words(a.x, a.y, a.nw, b.x, b.y, b.nw);
 }
 
 /// The terms of a Hamiltonian with complex coefficients, stored flat. Row i holds
@@ -363,7 +386,12 @@ class QubitHamiltonian{
 
         QubitHamiltonian operator*(double scale) const { return scaled(scale); }
 
+        /// Product this * other. For h * h (the same object on both sides) the
+        /// square formula below needs only about a quarter of the pairs.
         QubitHamiltonian operator*(const QubitHamiltonian& other) const {
+                if (this == &other) {
+                        return square();
+                }
                 if constexpr (kFlat) {
                         return QubitHamiltonian(product_flat(store_, other.store_), from_storage_t{});
                 } else {
@@ -799,11 +827,47 @@ class QubitHamiltonian{
                         throw std::runtime_error("Negative power not supported for QubitHamiltonian");
                 }
                 if (n == 0) return unit();
-                QubitHamiltonian result = *this;
-                for (int i = 1; i < n; ++i) {
+                if (n == 1) return *this;
+                QubitHamiltonian result = square();
+                for (int i = 2; i < n; ++i) {
                         result = result * *this;
                 }
                 return result;
+        }
+
+        /// this * this, from the pairs i < j only. P_i P_j and P_j P_i are equal if
+        /// the strings commute and cancel if they anti-commute, and P_i P_i = I, so
+        ///
+        ///     H^2 = (sum_i a_i^2) I + 2 sum_{i < j, P_i P_j = P_j P_i} a_i a_j P_i P_j .
+        ///
+        /// About a quarter of the pairs of the general product remain, and the
+        /// anti-commuting pairs leave no rounding residue.
+        QubitHamiltonian square() const {
+                if constexpr (kFlat) {
+                        return QubitHamiltonian(square_flat(store_), from_storage_t{});
+                } else {
+                        const size_t n = store_.size();
+                        Coeff diagonal = make_zero();
+                        for (const auto& ps : store_) {
+                                diagonal = diagonal + ps.coeff * ps.coeff;
+                        }
+                        std::vector<PauliString<Coeff>> terms;
+                        terms.emplace_back(std::vector<uint64_t>{}, std::vector<uint64_t>{}, diagonal);
+                        for (size_t i = 0; i < n; ++i) {
+                                const PauliString<Coeff>& a = store_[i];
+                                for (size_t j = i + 1; j < n; ++j) {
+                                        const PauliString<Coeff>& b = store_[j];
+                                        if (pauliengine_detail::anticommute_words(a.x.data(), a.y.data(), a.x.size(),
+                                                                                  b.x.data(), b.y.data(), b.x.size())) {
+                                                continue;
+                                        }
+                                        PauliString<Coeff> p = a * b;
+                                        p.coeff = p.coeff * Coeff(2);
+                                        terms.push_back(std::move(p));
+                                }
+                        }
+                        return QubitHamiltonian(std::move(terms));
+                }
         }
 
         Matrix2D to_matrix(bool ignore_unused_qubits = true) const {
@@ -1420,6 +1484,90 @@ class QubitHamiltonian{
                 order.reserve(std::accumulate(found.begin(), found.end(), size_t{0}));
                 for (size_t i = 0; i < n1; ++i) {
                         for (size_t r = i * n2; r < i * n2 + found[i]; ++r) order.push_back(r);
+                }
+                return merge_long(records, order);
+        }
+
+        /// a * a for strings of at most W words (see square()). Two passes over the
+        /// pairs: the first counts the commuting partners j > i of every row, the
+        /// second writes each row's records to its own range of one array. Checking a
+        /// pair twice is cheaper than collecting the records in buffers and copying
+        /// them, and the record order (identity, then row by row) does not depend on
+        /// the number of threads.
+        template<size_t W>
+        static FlatTerms square_small_key(const FlatTerms& a, size_t nw) {
+                using Term = KeyedTerm<W>;
+                using pauliengine_detail::anticommute;
+                const size_t n = a.size();
+                const size_t pairs = n * (n - (n > 0 ? 1 : 0)) / 2;
+                const bool parallel = pauliengine_detail::use_threads(pairs * W);
+                // rows get shorter towards the end, so they are handed out dynamically
+                std::vector<size_t> start(n + 1, 0);
+                pauliengine_detail::for_each_index_dynamic(n, parallel, [&](size_t i) {
+                        const TermView left = a.view(i);
+                        size_t count = 0;
+                        for (size_t j = i + 1; j < n; ++j) count += !anticommute(left, a.view(j));
+                        start[i + 1] = count;
+                });
+                start[0] = 1;                                   // record 0: the identity
+                for (size_t i = 0; i < n; ++i) start[i + 1] += start[i];
+                // new[] leaves the records untouched, so the threads fault their own pages in.
+                std::unique_ptr<Term[]> records(new Term[start[n]]);
+                Term* const raw = records.get();
+                std::complex<double> diagonal(0.0, 0.0);
+                for (size_t i = 0; i < n; ++i) diagonal += a.coeff(i) * a.coeff(i);
+                std::fill(raw[0].key, raw[0].key + 2 * W, uint64_t{0});
+                raw[0].re = diagonal.real();
+                raw[0].im = diagonal.imag();
+                pauliengine_detail::for_each_index_dynamic(n, parallel, [&](size_t i) {
+                        const TermView left = a.view(i);
+                        Term* out = raw + start[i];
+                        for (size_t j = i + 1; j < n; ++j) {
+                                const TermView right = a.view(j);
+                                if (!anticommute(left, right)) set_keyed_product<W>(*out++, left, right, 2.0);
+                        }
+                });
+                return merge_keyed_terms<W>(raw, start[n], nw);
+        }
+        /// a * a (see square()).
+        static FlatTerms square_flat(const FlatTerms& a) {
+                using pauliengine_detail::anticommute;
+                using pauliengine_detail::for_each_index;
+                using pauliengine_detail::use_threads;
+                const size_t n = a.size();
+                const size_t nw = a.width();
+                FlatTerms out;
+                if (with_small_key(nw, [&]<size_t W>() { out = square_small_key<W>(a, nw); })) {
+                        return out;
+                }
+                // Long strings: record 0 is the identity, then row i owns the n - 1 - i
+                // records from first_of(i) on and fills them from the start; the rest of
+                // its block is never touched.
+                const size_t pairs = n * (n - (n > 0 ? 1 : 0)) / 2;
+                const auto first_of = [n](size_t i) { return 1 + i * n - i * (i + 1) / 2; };
+                FlatTerms records(1 + pairs, nw);
+                std::fill(records.x(0), records.x(0) + 2 * nw, uint64_t{0});
+                std::complex<double> diagonal(0.0, 0.0);
+                for (size_t i = 0; i < n; ++i) diagonal += a.coeff(i) * a.coeff(i);
+                records.set_coeff(0, diagonal);
+                std::vector<size_t> found(n, 0);
+                pauliengine_detail::for_each_index_dynamic(n, use_threads(pairs * nw), [&](size_t i) {
+                        const TermView left = a.view(i);
+                        size_t r = first_of(i);
+                        for (size_t j = i + 1; j < n; ++j) {
+                                const TermView right = a.view(j);
+                                if (anticommute(left, right)) continue;
+                                const int power_of_i = records.set_row_product(r, left, right);
+                                records.set_coeff(r, pauliengine_detail::product_coeff(left.coeff, right.coeff, power_of_i, 2.0));
+                                ++r;
+                        }
+                        found[i] = r - first_of(i);
+                });
+                std::vector<size_t> order;
+                order.reserve(1 + std::accumulate(found.begin(), found.end(), size_t{0}));
+                order.push_back(0);
+                for (size_t i = 0; i < n; ++i) {
+                        for (size_t r = first_of(i); r < first_of(i) + found[i]; ++r) order.push_back(r);
                 }
                 return merge_long(records, order);
         }
