@@ -100,8 +100,6 @@ Pauli decomposition of matrices.
 - Documentation: Sphinx site under `docs/` (user guide, Python and C++
   reference via Breathe/Doxygen); install the tools with the `docs` dependency
   group.
-- A smoke test comparing nested commutators with a plain-Python computation
-  (`tools/commutator_precision_smoke.py`).
 
 ### Changed
 
@@ -111,26 +109,41 @@ Pauli decomposition of matrices.
 - `PauliString` takes 80 instead of 104 bytes: `WordVec` stores its size and capacity
   as 32-bit integers, and the unused C++ member `is_zero` is gone (the Python property
   `is_zero` is unchanged). Writing the result of large products gets faster.
-- Faster `QubitHamiltonian` product, commutator and compaction for complex
+- Faster `QubitHamiltonian` compaction, sums and sparse commutators for complex
   coefficients on up to 512 qubits: pairs are computed without temporary Pauli
   strings, terms are sorted with a radix sort, and large inputs run through a parallel
   sample sort without a serial merge step. Coefficients of equal operators are added
-  in input order, so results no longer depend on the thread count.
+  in input order, so results no longer depend on the thread count. (Products and most
+  commutators now use the prefix-partitioned product described below.)
 - `QubitHamiltonian` with complex coefficients stores its terms flat: one array of
   operator words (every term padded to the same width) and one of coefficients,
   instead of one `PauliString` per term. Products, commutators, sums, differences,
-  scaling and compaction work on these arrays directly; beyond 512 qubits they sort
-  an index instead of whole records. Commutators skip commuting pairs before forming
-  the product. Symbolic Hamiltonians are stored as before.
+  scaling and compaction work on these arrays directly; beyond 512 qubits, sums and
+  compaction sort an index instead of whole records. Commutators skip commuting pairs
+  before forming the product. Symbolic Hamiltonians are stored as before.
   C++ only: the public member `data` is gone. Use `terms()` (all terms as Pauli
   strings; built on request for complex coefficients), `term(i)` and `size()`.
   The Python API is unchanged.
+- Products, commutators and squares of complex `QubitHamiltonian`s use a
+  prefix-partitioned product: since a product's operator is the XOR of its factors',
+  pairs are partitioned by the leading bits of the operator they produce into
+  cache-sized partitions already in result order, so no array of all `n1 * n2`
+  products is sorted. Faster with one thread and especially with several.
+  Commutators with few anti-commuting pairs keep a simple scan. Results do not depend
+  on the number of threads.
+- Symbolic `QubitHamiltonian` products, commutators and squares group pairs by operator
+  first, so each pair costs one SymEngine product.
+- `unweighted_QubitHamiltonian` products and commutators use the prefix-partitioned
+  product with several threads; elements, order and phases are unchanged.
+- C++ only: internal helpers (`WordVec`, the coefficient helpers, the flat term storage
+  and the product kernel) live in `include/pauliengine/detail/`; the public headers
+  include them as before. `PauliCycleSum.h` and `PauliOrbitSum.h` now hold the member
+  functions of their classes and can be included on their own.
 - `h * h`, `h ** n` (`power`) and the new C++ method `square()` compute the square of a
-  `QubitHamiltonian` from the pairs i < j only: `P_i P_j` and `P_j P_i` are equal for
+  `QubitHamiltonian` from the pairs i <= j only: `P_i P_j` and `P_j P_i` are equal for
   commuting strings and cancel for anti-commuting ones, so
   `H^2 = (sum a_i^2) I + 2 sum_{i<j, commuting} a_i a_j P_i P_j`. About a quarter of the
-  records of the general product remain; measured 2 to 4 times faster (about 2 times for
-  local strings, which commute more often). Anti-commuting pairs no longer leave rounding
+  pairs of the general product remain. Anti-commuting pairs no longer leave rounding
   residues of order 1e-16, and the result is the same for any number of threads. The
   general path is taken when the two operands are different objects.
 - No OpenMP region is opened for work below the threshold; even an inactive one
@@ -155,6 +168,9 @@ Pauli decomposition of matrices.
   is zero.
 - The `__rmul__` overloads between complex and symbolic Pauli strings could never
   be called.
+- Symbolic `QubitHamiltonian`s kept terms whose coefficient is zero only after
+  expanding, for example `h - h` with the coefficient `2 + a`. Merged coefficients are
+  now expanded before the zero test.
 
 ## [0.1.4] - 2026-09-30
 

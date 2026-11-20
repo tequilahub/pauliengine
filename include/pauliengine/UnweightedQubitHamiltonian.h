@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "pauliengine/QubitHamiltonian.h"
+#include "pauliengine/detail/PrefixPartitionedProduct.h"
 #include "pauliengine/UnweightedPauliString.h"
 
 /// An ordered set of Pauli strings without coefficients, each with its own phase i^k,
@@ -214,7 +215,126 @@ class unweighted_QubitHamiltonian {
                         return n;
                 }
 
+                /// From this many pairs on, and with several threads, products go through
+                /// the prefix-partitioned product of QubitHamiltonian
+                /// (pauliengine_detail::PrefixPartitionedProduct).
+                /// With one thread the loop below is as fast: building the set, which
+                /// both need, takes most of the time.
+                static constexpr size_t kBlockPairs = 4096;
+
+                /// The terms as flat rows of n_words words; the coefficient of row i is
+                /// (i, phase exponent), as PrefixPartitionedProduct::first_pairs() expects.
+                static pauliengine_detail::FlatTerms flat_rows(const std::vector<unweighted_pauliString>& terms, size_t n_words) {
+                        pauliengine_detail::FlatTerms rows(terms.size(), n_words);
+                        for (size_t i = 0; i < terms.size(); ++i) {
+                                const unweighted_pauliString& term = terms[i];
+                                uint64_t* x = rows.x(i);
+                                uint64_t* y = rows.y(i);
+                                for (size_t k = 0; k < n_words; ++k) {
+                                        x[k] = k < term.x.size() ? term.x[k] : 0;
+                                        y[k] = k < term.y.size() ? term.y[k] : 0;
+                                }
+                                rows.set_coeff(i, {static_cast<double>(i), static_cast<double>(term.phase())});
+                        }
+                        return rows;
+                }
+
+                /// The same set as the loop over all pairs gives, in the same order and
+                /// with the same phases: the prefix-partitioned product finds, for every operator, its
+                /// pair of lowest rank i * other.size() + j, which is the pair the loop
+                /// would insert first. The operators are then put in the order of these
+                /// ranks, by row i first (counting) and by j within a row.
+                std::optional<unweighted_QubitHamiltonian> pairwise_by_blocks(const unweighted_QubitHamiltonian& other,
+                                                                             bool anti_commuting_only) const {
+                        using pauliengine_detail::FlatTerms;
+                        using pauliengine_detail::PrefixPartitionedProduct;
+                        const size_t n1 = size();
+                        const size_t n2 = other.size();
+                        // The kernel forms a commutator only where a fair share of the pairs
+                        // anti-commute, judged as for QubitHamiltonian by a grid of pairs.
+                        if (anti_commuting_only) {
+                                const size_t side = n1 * n2 >= 65536 ? 32 : 16;
+                                const size_t rows_a = std::min(n1, side);
+                                const size_t rows_b = std::min(n2, side);
+                                size_t found = 0;
+                                for (size_t s = 0; s < rows_a; ++s) {
+                                        const unweighted_pauliString& left = data_[s * n1 / rows_a];
+                                        for (size_t t = 0; t < rows_b; ++t) {
+                                                found += !left.commutes(other.data_[t * n2 / rows_b]);
+                                        }
+                                }
+                                if (8 * found < rows_a * rows_b) {
+                                        return std::nullopt;
+                                }
+                        }
+                        const size_t n_words = std::max(longest(data_), longest(other.data_));
+                        const FlatTerms a = flat_rows(data_, n_words);
+                        const FlatTerms b = flat_rows(other.data_, n_words);
+                        const FlatTerms firsts = PrefixPartitionedProduct::first_pairs(a, b, anti_commuting_only);
+                        const size_t m = firsts.size();
+                        if (m >= std::numeric_limits<uint32_t>::max() - 1) {
+                                throw std::length_error("unweighted_QubitHamiltonian: too many elements");
+                        }
+                        std::vector<uint64_t> rank(m);
+                        std::vector<uint32_t> row_start(n1 + 1, 0);
+                        for (size_t r = 0; r < m; ++r) {
+                                rank[r] = static_cast<uint64_t>(firsts.coeff(r).real());
+                                ++row_start[rank[r] / n2 + 1];
+                        }
+                        for (size_t i = 0; i < n1; ++i) {
+                                row_start[i + 1] += row_start[i];
+                        }
+                        std::vector<uint32_t> order(m);
+                        {
+                                std::vector<uint32_t> next(row_start.begin(), row_start.end() - 1);
+                                for (size_t r = 0; r < m; ++r) {
+                                        order[next[rank[r] / n2]++] = static_cast<uint32_t>(r);
+                                }
+                        }
+                        for (size_t i = 0; i < n1; ++i) {
+                                std::sort(order.begin() + row_start[i], order.begin() + row_start[i + 1],
+                                          [&rank](uint32_t p, uint32_t q) { return rank[p] < rank[q]; });
+                        }
+
+                        // The strings and their hashes, on all threads.
+                        unweighted_QubitHamiltonian result;
+                        result.data_.resize(m);
+                        std::vector<uint64_t> hashes(m);
+                        pauliengine_detail::for_each_index(m, pauliengine_detail::use_threads(m * n_words), [&](size_t p) {
+                                const uint32_t r = order[p];
+                                unweighted_pauliString& added = result.data_[p];
+                                added = unweighted_pauliString(firsts.x(r), firsts.y(r), n_words, static_cast<int>(firsts.coeff(r).imag()));
+                                hashes[p] = hash_words(added.x.data(), added.y.data(), added.x.size());
+                        });
+                        // The table is filled in the order of the home slots, a stretch of
+                        // 256 slots at a time, instead of all over it.
+                        const size_t n_slots = std::bit_ceil(std::max<size_t>(16, 2 * (m + 1)));
+                        result.slots_.assign(n_slots, Slot{});
+                        const unsigned shift = n_slots > 256 ? 8 : 0;
+                        std::vector<uint32_t> stretch_start((n_slots >> shift) + 1, 0);
+                        for (size_t p = 0; p < m; ++p) {
+                                ++stretch_start[((hashes[p] & (n_slots - 1)) >> shift) + 1];
+                        }
+                        for (size_t g = 1; g < stretch_start.size(); ++g) {
+                                stretch_start[g] += stretch_start[g - 1];
+                        }
+                        std::vector<uint32_t> by_slot(m);
+                        for (size_t p = 0; p < m; ++p) {
+                                by_slot[stretch_start[(hashes[p] & (n_slots - 1)) >> shift]++] = static_cast<uint32_t>(p);
+                        }
+                        for (const uint32_t p : by_slot) {
+                                result.place(hashes[p], p);
+                        }
+                        return result;
+                }
+
                 unweighted_QubitHamiltonian pairwise(const unweighted_QubitHamiltonian& other, bool anti_commuting_only) const {
+                        const size_t pairs = size() * other.size();
+                        if (pairs >= kBlockPairs && pauliengine_detail::use_threads(pairs)) {
+                                if (auto result = pairwise_by_blocks(other, anti_commuting_only)) {
+                                        return std::move(*result);
+                                }
+                        }
                         unweighted_QubitHamiltonian result;
                         const size_t n_buffer = std::max(longest(data_), longest(other.data_));
                         std::vector<uint64_t> out_x(n_buffer);

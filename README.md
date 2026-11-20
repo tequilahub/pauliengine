@@ -1,3 +1,7 @@
+<p align="center">
+  <img alt="PauliEngine" src="docs/logo/pauliengine-lockup-paulis-color.svg" width="420">
+</p>
+
 # PauliEngine — Fast Arithmetic for Quantum Operators
 
 A C++ core with a nanobind Python frontend for working with Pauli strings and

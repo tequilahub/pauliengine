@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file
-/// Small helpers that let the cycle and orbit classes work with both coefficient
+/// Internal: small helpers that let the operator classes work with both coefficient
 /// types, std::complex<double> and SymEngine::Expression.
 
 #include <complex>

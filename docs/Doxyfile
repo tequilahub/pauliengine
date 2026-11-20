@@ -6,7 +6,7 @@
 
 PROJECT_NAME           = PauliEngine
 OUTPUT_DIRECTORY       = _build/doxygen
-INPUT                  = ../include/pauliengine
+INPUT                  = ../include/pauliengine ../include/pauliengine/detail/WordVec.h
 FILE_PATTERNS          = *.h
 RECURSIVE              = NO
 
