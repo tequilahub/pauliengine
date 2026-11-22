@@ -211,6 +211,15 @@ class FlatTerms {
                 }
         }
 
+        /// Changes the number of terms to n, keeping the first min(n, size()) of them;
+        /// added terms are uninitialised.
+        void resize(size_t n) {
+                if (n == n_) return;
+                grow_block(words_, 2 * n * nw_);
+                grow_block(coeffs_, 2 * n);
+                n_ = n;
+        }
+
         /// Sets rows first, first + 1, ... to `count` terms given as rows of
         /// 2 * width() words and as (real, imaginary) pairs.
         void assign_rows(size_t first, const uint64_t* words, const double* coeffs, size_t count) noexcept {
@@ -237,6 +246,18 @@ class FlatTerms {
                 }
                 void* p = std::realloc(block.get(), count * sizeof(T));
                 if (p == nullptr) return;  // the larger block stays valid
+                block.release();
+                block.reset(static_cast<T*>(p));
+        }
+
+        template<typename T>
+        static void grow_block(std::unique_ptr<T[], FreeDeleter>& block, size_t count) {
+                if (count == 0) {
+                        block.reset();
+                        return;
+                }
+                void* p = std::realloc(block.get(), count * sizeof(T));
+                if (p == nullptr) throw std::bad_alloc();  // the old block stays valid
                 block.release();
                 block.reset(static_cast<T*>(p));
         }

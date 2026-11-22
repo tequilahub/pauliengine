@@ -23,6 +23,7 @@
 #include "pauliengine/detail/Coefficients.h"
 #include "pauliengine/PauliString.h"
 #include "pauliengine/detail/PrefixPartitionedProduct.h"
+#include "pauliengine/detail/OverlappingPairs.h"
 
 #include <symengine/add.h>
 #include <symengine/expression.h>
@@ -1269,17 +1270,35 @@ class QubitHamiltonian{
                 return pauliengine_detail::PrefixPartitionedProduct::square(a);
         }
 
-        /// [a, b] for strings of at most W words, written with width nw.
+        /// [a, b] for strings of at most W words, written with width nw. With
+        /// `overlap`, only the pairs listed there are tested.
         template<size_t W>
-        static FlatTerms commutator_small_key(const FlatTerms& a, const FlatTerms& b, size_t nw) {
+        static FlatTerms commutator_small_key(const FlatTerms& a, const FlatTerms& b, size_t nw,
+                                              const pauliengine_detail::OverlappingPairs* overlap) {
                 using Term = KeyedTerm<W>;
                 const size_t n1 = a.size();
                 const size_t n2 = b.size();
-                const size_t pairs = n1 * n2;
+                const size_t pairs = overlap ? overlap->size() : n1 * n2;
                 // Appends the commutators of row i with all of b that do not vanish.
                 // Most pairs are only tested here, so the test reads nothing but the words.
                 const size_t wa = a.width();
                 const size_t wb = b.width();
+                // The same for the listed pairs only (kept apart from add_row, whose
+                // loops over all of b are the hot path otherwise).
+                const auto add_listed = [&](size_t i, std::vector<Term>& mine) {
+                        const TermView left = a.view(i);
+                        const size_t w = std::min(wa, wb);
+                        const uint32_t* col = overlap->cols.data();
+                        for (size_t k = overlap->start[i]; k < overlap->start[i + 1]; ++k) {
+                                const size_t j = col[k];
+                                const uint64_t* row = b.x(j);  // x words, then y words
+                                uint64_t anti = 0;
+                                for (size_t t = 0; t < w; ++t) anti ^= (left.x[t] & row[wb + t]) ^ (row[t] & left.y[t]);
+                                if (std::popcount(anti) & 1) {
+                                        set_keyed_product<W>(mine.emplace_back(), left, b.view(j), 2.0);
+                                }
+                        }
+                };
                 const auto add_row = [&](size_t i, std::vector<Term>& mine) {
                         const TermView left = a.view(i);
                         if (wa == 1 && wb == 1) {
@@ -1314,7 +1333,9 @@ class QubitHamiltonian{
                                 std::vector<Term> mine;
                                 mine.reserve(pairs / (8 * static_cast<size_t>(nthreads)) + 1);
                                 #pragma omp for schedule(static)
-                                for (std::ptrdiff_t i = 0; i < rows; ++i) add_row(static_cast<size_t>(i), mine);
+                                for (std::ptrdiff_t i = 0; i < rows; ++i) {
+                                        if (overlap) add_listed(static_cast<size_t>(i), mine); else add_row(static_cast<size_t>(i), mine);
+                                }
                                 local[omp_get_thread_num()] = std::move(mine);
                         }
                         // A static schedule hands out ascending rows, so this is the serial order.
@@ -1331,7 +1352,9 @@ class QubitHamiltonian{
 #endif
                 std::vector<Term> mine;
                 mine.reserve(pairs / 8 + 1);
-                for (size_t i = 0; i < n1; ++i) add_row(i, mine);
+                for (size_t i = 0; i < n1; ++i) {
+                        if (overlap) add_listed(i, mine); else add_row(i, mine);
+                }
                 return merge_keyed_terms<W>(mine.data(), mine.size(), nw);
         }
 
@@ -1343,38 +1366,105 @@ class QubitHamiltonian{
                         return PrefixPartitionedProduct::run(a, b, true);
                 }
                 // Few pairs contribute: pick them out first, then sort and merge them.
+                // If few pairs even share a qubit, only those are tested.
+                std::optional<pauliengine_detail::OverlappingPairs> overlap;
+                if (a.size() * b.size() >= 4096) {
+                        overlap = pauliengine_detail::OverlappingPairs::find(a, b);
+                }
+                const pauliengine_detail::OverlappingPairs* listed = overlap ? &*overlap : nullptr;
                 using pauliengine_detail::anticommute;
                 using pauliengine_detail::for_each_index;
                 using pauliengine_detail::use_threads;
                 const size_t n1 = a.size();
                 const size_t n2 = b.size();
-                const size_t pairs = n1 * n2;
+                const size_t pairs = listed ? listed->size() : n1 * n2;
                 const size_t nw = std::max(a.width(), b.width());
                 FlatTerms out;
-                if (with_small_key(nw, [&]<size_t W>() { out = commutator_small_key<W>(a, b, nw); })) {
+                if (with_small_key(nw, [&]<size_t W>() { out = commutator_small_key<W>(a, b, nw, listed); })) {
                         return out;
                 }
-                // Long strings: row i of a writes its results to the start of its own
-                // block of n2 records; the rest of the block is never touched.
-                FlatTerms records(pairs, nw);
-                std::vector<size_t> found(n1, 0);
-                for_each_index(n1, use_threads(pairs * nw), [&](size_t i) {
+                // Long strings, listed pairs: row i writes its results to the start of its
+                // own block of listed pairs; the rest of the block is never touched.
+                if (listed) {
+                        FlatTerms records(pairs, nw);
+                        std::vector<size_t> found(n1, 0);
+                        for_each_index(n1, use_threads(pairs * nw), [&](size_t i) {
+                                const TermView left = a.view(i);
+                                size_t r = listed->start[i];
+                                for (size_t k = listed->start[i]; k < listed->start[i + 1]; ++k) {
+                                        const TermView right = b.view(listed->cols[k]);
+                                        if (!anticommute(left, right)) continue;
+                                        const int power_of_i = records.set_row_product(r, left, right);
+                                        records.set_coeff(r, pauliengine_detail::product_coeff(left.coeff, right.coeff, power_of_i, 2.0));
+                                        ++r;
+                                }
+                                found[i] = r - listed->start[i];
+                        });
+                        std::vector<size_t> order;
+                        order.reserve(std::accumulate(found.begin(), found.end(), size_t{0}));
+                        for (size_t i = 0; i < n1; ++i) {
+                                for (size_t r = listed->start[i]; r < listed->start[i] + found[i]; ++r) order.push_back(r);
+                        }
+                        return merge_long(records, order);
+                }
+                // Long strings, all pairs: a block per row would take memory for all
+                // n1 * n2 pairs, so each thread appends its results to a growing buffer
+                // instead, and memory follows the pairs found.
+                struct Found {
+                        FlatTerms terms;  // the first `used` rows are written
+                        size_t used = 0;
+                };
+                const auto scan_row = [&](size_t i, Found& mine) {
                         const TermView left = a.view(i);
-                        size_t r = i * n2;
                         for (size_t j = 0; j < n2; ++j) {
                                 const TermView right = b.view(j);
                                 if (!anticommute(left, right)) continue;
-                                const int power_of_i = records.set_row_product(r, left, right);
-                                records.set_coeff(r, pauliengine_detail::product_coeff(left.coeff, right.coeff, power_of_i, 2.0));
-                                ++r;
+                                if (mine.used == mine.terms.size()) {
+                                        mine.terms.resize(std::max<size_t>(64, 2 * mine.terms.size()));
+                                }
+                                const size_t r = mine.used++;
+                                const int power_of_i = mine.terms.set_row_product(r, left, right);
+                                mine.terms.set_coeff(r, pauliengine_detail::product_coeff(left.coeff, right.coeff, power_of_i, 2.0));
                         }
-                        found[i] = r - i * n2;
-                });
-                std::vector<size_t> order;
-                order.reserve(std::accumulate(found.begin(), found.end(), size_t{0}));
-                for (size_t i = 0; i < n1; ++i) {
-                        for (size_t r = i * n2; r < i * n2 + found[i]; ++r) order.push_back(r);
+                };
+                std::vector<Found> local(1);
+                local[0].terms = FlatTerms(0, nw);
+#ifdef PAULIENGINE_HAS_OPENMP
+                if (use_threads(pairs * nw)) {
+                        local.resize(static_cast<size_t>(omp_get_max_threads()));
+                        const std::ptrdiff_t rows = static_cast<std::ptrdiff_t>(n1);  // signed for OpenMP 2.0
+                        #pragma omp parallel
+                        {
+                                // Filled as a local object: the buffers in `local` share cache lines.
+                                Found mine;
+                                mine.terms = FlatTerms(0, nw);
+                                #pragma omp for schedule(static)
+                                for (std::ptrdiff_t i = 0; i < rows; ++i) scan_row(static_cast<size_t>(i), mine);
+                                local[static_cast<size_t>(omp_get_thread_num())] = std::move(mine);
+                        }
+                } else
+#endif
+                {
+                        for (size_t i = 0; i < n1; ++i) scan_row(i, local[0]);
                 }
+                FlatTerms records;
+                if (local.size() == 1) {
+                        records = std::move(local[0].terms);
+                        records.shrink_to(local[0].used);
+                } else {
+                        // A static schedule hands out ascending rows, so this is the serial order.
+                        std::vector<size_t> offset(local.size() + 1, 0);
+                        for (size_t t = 0; t < local.size(); ++t) offset[t + 1] = offset[t] + local[t].used;
+                        records = FlatTerms(offset.back(), nw);
+                        for_each_index(local.size(), true, [&](size_t t) {
+                                if (local[t].used) {
+                                        records.assign_rows(offset[t], local[t].terms.x(0), local[t].terms.coeff_data(0), local[t].used);
+                                }
+                                local[t].terms = FlatTerms();
+                        });
+                }
+                std::vector<size_t> order(records.size());
+                std::iota(order.begin(), order.end(), size_t{0});
                 return merge_long(records, order);
         }
 

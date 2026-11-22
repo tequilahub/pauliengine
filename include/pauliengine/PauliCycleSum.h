@@ -4,10 +4,13 @@
 #include <complex>
 #include <cstddef>
 #include <iterator>
+#include <optional>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
 #include "pauliengine/detail/Coefficients.h"
+#include "pauliengine/detail/SparseCycles.h"
 #include "pauliengine/PauliString.h"
 #include "pauliengine/QubitHamiltonian.h"
 
@@ -65,6 +68,12 @@ class PauliCycleSum {
 
                 /// Number of summands.
                 size_t size() const { return data.size(); }
+
+        private:
+                /// sum_ij c_i d_j, or sum_ij [c_i, d_j], formed on site lists (see
+                /// detail/SparseCycles.h); nothing if a base acts on too many sites for
+                /// that, or the summands differ in n_qubits.
+                std::optional<PauliCycleSum> sparse_pairs(const PauliCycleSum& other, bool commutator) const;
 };
 
 
@@ -82,15 +91,23 @@ QubitHamiltonian<Coeff> PauliCycleSum<Coeff>::to_qubit_hamiltonian() const {
 
 template <typename Coeff>
 PauliCycleSum<Coeff>::PauliCycleSum(std::vector<PauliCycle<Coeff>> cycles) {
-        // Hash-join on the rotation orbit: O(1) per summand instead of a linear
-        // scan. The map keys point into `data`; reserving up front guarantees
-        // they stay valid (data never grows beyond cycles.size()).
+        // Hash-join on the cycle (the base up to rotation). For cycles with many sites a cheap
+        // rotation-invariant signature comes first: a cycle whose signature no other
+        // summand has starts a new summand without being unified. Summands sharing a
+        // signature, and sparse cycles, whose unified form is cheap anyway, are joined
+        // on the unified form, so the merging decisions are those of a join on the
+        // unified form alone. Whether a cycle takes the signature is the same for all
+        // rotations of its base, so equal cycles always meet. The map keys point into `data`; reserving up
+        // front guarantees they stay valid (data never grows beyond cycles.size()).
         struct OrbitHash {
                 size_t operator()(const PauliCycle<Coeff>* c) const { return c->hash(); }
         };
         struct OrbitEqual {
                 bool operator()(const PauliCycle<Coeff>* a, const PauliCycle<Coeff>* b) const { return *a == *b; }
         };
+        constexpr size_t kInIndex = static_cast<size_t>(-1);
+        // signature -> the one summand with it that is not in `index` yet, or kInIndex
+        std::unordered_map<size_t, size_t> by_signature;
         std::unordered_map<const PauliCycle<Coeff>*, size_t, OrbitHash, OrbitEqual> index;
         index.reserve(cycles.size());
         data.reserve(cycles.size());
@@ -100,6 +117,17 @@ PauliCycleSum<Coeff>::PauliCycleSum(std::vector<PauliCycle<Coeff>> cycles) {
                         throw std::invalid_argument("PauliCycleSum: all cycles must have the same n_qubits ("
                                 + std::to_string(data.front().n_qubits) + " vs "
                                 + std::to_string(c.n_qubits) + ")");
+                }
+                if (c.prefers_signature()) {
+                        const auto [slot, fresh] = by_signature.try_emplace(c.rotation_signature(), data.size());
+                        if (fresh) {
+                                data.push_back(std::move(c));
+                                continue;
+                        }
+                        if (slot->second != kInIndex) {
+                                index.emplace(&data[slot->second], slot->second);
+                                slot->second = kInIndex;
+                        }
                 }
                 const auto it = index.find(&c);
                 if (it != index.end()) {
@@ -141,6 +169,9 @@ template <typename Coeff>
 PauliCycleSum<Coeff> PauliCycleSum<Coeff>::commutator(const PauliCycleSum& other) const {
         // [ sum_i c_i , sum_j d_j ] = sum_{i,j} [c_i, d_j]. Each cycle carries its
         // own coefficient, so the pairwise results are collected and merged.
+        if (auto sparse = sparse_pairs(other, true)) {
+                return std::move(*sparse);
+        }
         std::vector<PauliCycle<Coeff>> combined;
         for (const auto& ci : data) {
                 for (const auto& dj : other.data) {
@@ -156,6 +187,9 @@ PauliCycleSum<Coeff> PauliCycleSum<Coeff>::commutator(const PauliCycleSum& other
 template <typename Coeff>
 PauliCycleSum<Coeff> PauliCycleSum<Coeff>::operator*(const PauliCycleSum& other) const {
         // ( sum_i c_i )( sum_j d_j ) = sum_{i,j} c_i d_j, merged across all pairs.
+        if (auto sparse = sparse_pairs(other, false)) {
+                return std::move(*sparse);
+        }
         std::vector<PauliCycle<Coeff>> combined;
         for (const auto& ci : data) {
                 for (const auto& dj : other.data) {
@@ -166,6 +200,73 @@ PauliCycleSum<Coeff> PauliCycleSum<Coeff>::operator*(const PauliCycleSum& other)
                 }
         }
         return PauliCycleSum(std::move(combined));
+}
+
+template <typename Coeff>
+std::optional<PauliCycleSum<Coeff>> PauliCycleSum<Coeff>::sparse_pairs(const PauliCycleSum& other, bool commutator) const {
+        using Kernel = pauliengine_detail::SparseCycleProducts<Coeff>;
+        using pauliengine_detail::SparseString;
+        if (data.empty() || other.data.empty()) {
+                return std::nullopt;
+        }
+        const int n = data.front().n_qubits;
+        const size_t nw = (static_cast<size_t>(n) + 63) / 64;
+        std::vector<SparseString> sa, sb;
+        std::vector<Coeff> ca, cb;
+        const auto load = [&](const PauliCycleSum& sum, std::vector<SparseString>& sites, std::vector<Coeff>& coeffs) {
+                sites.reserve(sum.data.size());
+                coeffs.reserve(sum.data.size());
+                for (const auto& c : sum.data) {
+                        if (c.n_qubits != n) {
+                                return false;  // the pairwise route reports the mismatch
+                        }
+                        sites.push_back(SparseString::of(c.Base.x, c.Base.y));
+                        if (!Kernel::suitable(sites.back().pos.size(), nw)) {
+                                return false;
+                        }
+                        coeffs.push_back(c.Base.coeff);
+                }
+                return true;
+        };
+        if (!load(*this, sa, ca) || !load(other, sb, cb)) {
+                return std::nullopt;
+        }
+        Kernel kernel;
+        kernel.run(sa, ca, sb, cb, static_cast<uint32_t>(n), commutator ? Kernel::Op::Commutator : Kernel::Op::Product);
+        // Every summand's base is the unified representative of its class, which the
+        // merging has found: no second copy of it, and unify() has nothing to do.
+        const auto build = [&](const typename Kernel::Summand& s) {
+                WordVec ux(nw), uy(nw);
+                Kernel::unified_words(kernel.items.data() + s.off, s.len, ux.data(), uy.data(), nw);
+                PauliCycle<Coeff> c(n, PauliString<Coeff>(std::move(ux), std::move(uy), s.coeff),
+                                    typename PauliCycle<Coeff>::trusted_t{});
+                c.base_unified_ = true;
+                return c;
+        };
+        const size_t m = kernel.summands.size();
+        PauliCycleSum out;
+        out.data.reserve(m);
+#ifdef PAULIENGINE_HAS_OPENMP
+        // a summand costs about 100 ns to build, so a team pays off from tens of thousands
+        if (std::is_same_v<Coeff, std::complex<double>> && pauliengine_detail::use_threads(m / 8)) {
+                // contiguous ranges per thread, appended in order
+                const size_t threads = static_cast<size_t>(omp_get_max_threads());
+                std::vector<std::vector<PauliCycle<Coeff>>> parts(threads);
+                pauliengine_detail::for_each_index(threads, true, [&](size_t t) {
+                        const size_t lo = m * t / threads, hi = m * (t + 1) / threads;
+                        parts[t].reserve(hi - lo);
+                        for (size_t k = lo; k < hi; ++k) parts[t].push_back(build(kernel.summands[k]));
+                });
+                for (auto& part : parts) {
+                        std::move(part.begin(), part.end(), std::back_inserter(out.data));
+                }
+                return out;
+        }
+#endif
+        for (const auto& s : kernel.summands) {
+                out.data.push_back(build(s));
+        }
+        return out;
 }
 
 template <typename Coeff>
@@ -233,7 +334,7 @@ Coeff PauliCycleSum<Coeff>::targeted_commutator(const PauliCycleSum& other, cons
         std::vector<uint32_t> next(inner.size(), kNone);
         for (size_t j = 0; j < inner.size(); ++j) {
                 inner[j].ensure_unified();
-                const size_t h = PauliCycle<Coeff>::hash_unified(inner[j].unified_x_, inner[j].unified_y_);
+                const size_t h = PauliCycle<Coeff>::hash_unified(inner[j].ux(), inner[j].uy());
                 const auto [it, inserted] = head.try_emplace(h, static_cast<uint32_t>(j));
                 if (!inserted) {
                         next[j] = it->second;
@@ -272,8 +373,8 @@ Coeff PauliCycleSum<Coeff>::targeted_commutator(const PauliCycleSum& other, cons
                                 if (stamp[j] == i) {
                                         continue;
                                 }
-                                if (PauliCycle<Coeff>::cmp_words(ux, inner[j].unified_x_, nw) == 0
-                                    && PauliCycle<Coeff>::cmp_words(uy, inner[j].unified_y_, nw) == 0) {
+                                if (PauliCycle<Coeff>::cmp_words(ux, inner[j].ux(), nw) == 0
+                                    && PauliCycle<Coeff>::cmp_words(uy, inner[j].uy(), nw) == 0) {
                                         stamp[j] = i;
                                         partners.push_back(j);
                                 }

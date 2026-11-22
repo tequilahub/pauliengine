@@ -216,7 +216,8 @@ auto bind_cycle(nb::module_& m, const char* name, const char* doc) {
                 .def("__mul__", [](const Cy& a, const Cy& b) { return a * b; }, nb::arg("other"),
                         "Product self * other as a PauliCycleSum (at most n_qubits summands after merging).")
                 .def_ro("n_qubits", &Cy::n_qubits, "Number of qubits (read-only).")
-                .def_ro("base", &Cy::Base, "The stored base Pauli string (as constructed, or unified after unify()); carries the coefficient.")
+                .def_ro("base", &Cy::Base, "The stored base Pauli string (as constructed, or unified after unify(); the summands of products and "
+                        "commutators of cycle sums with sparse bases are unified already); carries the coefficient.")
                 .def("__repr__", [type = std::string(name)](const Cy& pc) {
                         return type + "(n_qubits=" + std::to_string(pc.n_qubits) + ", base=" + pc.Base.to_string() + ")";
                 }, "Class name(n_qubits=..., base=...).")

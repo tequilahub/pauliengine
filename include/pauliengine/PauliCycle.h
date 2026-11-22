@@ -66,13 +66,30 @@ class PauliCycle {
                         validate();
                 }
 
+        private:
+                /// A base known to act on qubits 0..qubits-1 only, such as a product of
+                /// two rotations of valid bases: no validation.
+                struct trusted_t {};
+                PauliCycle(int qubits, PauliString<Coeff>&& base, trusted_t)
+                        : n_qubits(qubits), Base(std::move(base)) {}
+
+        public:
+
                 /// Rewrite Base to the unified representative of the orbit (see
                 /// ensure_unified()). Optional and idempotent. operator==/hash are
                 /// rotation-invariant on their own, so this is only needed when you
                 /// want the stored Base (and hence rotate()/repr) to be unified.
                 void unify() {
+                        if (base_unified_) {
+                                return;
+                        }
                         ensure_unified();
                         Base = PauliString<Coeff>(unified_x_, unified_y_, Base.coeff);
+                        // the cache is the base now
+                        base_unified_ = true;
+                        unified_valid_ = false;
+                        unified_x_ = WordVec();
+                        unified_y_ = WordVec();
                 }
 
 
@@ -115,10 +132,10 @@ class PauliCycle {
                         }
                         ensure_unified();
                         other.ensure_unified();
-                        const size_t nwords = std::max({n_words(), unified_x_.size(),
-                                unified_y_.size(), other.unified_x_.size(), other.unified_y_.size()});
-                        return cmp_words(unified_x_, other.unified_x_, nwords) == 0
-                                && cmp_words(unified_y_, other.unified_y_, nwords) == 0;
+                        const size_t nwords = std::max({n_words(), ux().size(),
+                                uy().size(), other.ux().size(), other.uy().size()});
+                        return cmp_words(ux(), other.ux(), nwords) == 0
+                                && cmp_words(uy(), other.uy(), nwords) == 0;
                 }
 
                 /// Period d of the base: the smallest d > 0 with R^d P = P, i.e. the
@@ -166,9 +183,63 @@ class PauliCycle {
                 size_t hash() const {
                         ensure_unified();
                         size_t h = std::hash<int>{}(n_qubits);
-                        mix_words(h, unified_x_);
-                        mix_words(h, unified_y_);
+                        mix_words(h, ux());
+                        mix_words(h, uy());
                         return h;
+                }
+
+                /// Whether rotation_signature() is cheaper than the unified form: the base
+                /// has many sites for its number of words. The same for all rotations of
+                /// the base.
+                bool prefers_signature() const {
+                        const size_t used = std::min(Base.x.size(), Base.y.size());
+                        size_t weight = 0;
+                        for (size_t w = 0; w < used; ++w) weight += static_cast<size_t>(std::popcount(Base.x[w] | Base.y[w]));
+                        return weight > 4 * n_words() + 16;
+                }
+
+                /// Hash of quantities that do not change under rotation: n_qubits, the
+                /// numbers of X, Y and Z sites and of every pair of cyclically adjacent
+                /// Paulis. Equal cycles (bases that are rotations of each other) always
+                /// share it; cycles with different signatures differ. O(n / 64), against
+                /// O(n / 64 + w) for the unified form, so merging can skip unifying cycles
+                /// whose signatures differ.
+                size_t rotation_signature() const {
+                        const int n = n_qubits;
+                        const size_t nw = n_words();
+                        thread_local WordVec masks[3];
+                        thread_local WordVec shifted[3];
+                        for (WordVec& m : masks) m.resize(nw);
+                        const size_t used = std::min(Base.x.size(), Base.y.size());
+                        uint64_t counts[3] = {0, 0, 0};
+                        for (size_t w = 0; w < nw; ++w) {
+                                const uint64_t x = w < used ? Base.x[w] : 0;
+                                const uint64_t y = w < used ? Base.y[w] : 0;
+                                masks[0][w] = x & ~y;  // X
+                                masks[1][w] = y & ~x;  // Y
+                                masks[2][w] = x & y;   // Z
+                                for (int p = 0; p < 3; ++p) counts[p] += static_cast<uint64_t>(std::popcount(masks[p][w]));
+                        }
+                        uint64_t h = 0x9E3779B97F4A7C15ULL ^ static_cast<uint64_t>(n);
+                        const auto mix = [&h](uint64_t v) {
+                                h ^= v + 0x9E3779B97F4A7C15ULL + (h << 6) + (h >> 2);
+                                h *= 0xBF58476D1CE4E5B9ULL;
+                                h ^= h >> 31;
+                        };
+                        for (uint64_t c : counts) mix(c);
+                        if (n > 1) {
+                                for (int p = 0; p < 3; ++p) rotate_words_into(masks[p], n, 1, shifted[p]);
+                                for (int p = 0; p < 3; ++p) {
+                                        for (int q = 0; q < 3; ++q) {
+                                                uint64_t pairs = 0;
+                                                for (size_t w = 0; w < nw; ++w) {
+                                                        pairs += static_cast<uint64_t>(std::popcount(masks[p][w] & shifted[q][w]));
+                                                }
+                                                mix(pairs);
+                                        }
+                                }
+                        }
+                        return static_cast<size_t>(h);
                 }
 
                 /// Invertible, coefficient-independent key of the cycle, consistent
@@ -178,7 +249,7 @@ class PauliCycle {
                 std::vector<uint64_t> get_hash() const {
                         ensure_unified();
                         const std::vector<uint64_t> s =
-                                PauliString<Coeff>(unified_x_, unified_y_, pauliengine_detail::coeff_one<Coeff>()).get_hash();
+                                PauliString<Coeff>(ux(), uy(), pauliengine_detail::coeff_one<Coeff>()).get_hash();
                         std::vector<uint64_t> out(s.size() + 1);
                         out[0] = static_cast<uint64_t>(static_cast<uint32_t>(n_qubits));
                         for (size_t i = 0; i < s.size(); ++i) {
@@ -215,8 +286,26 @@ class PauliCycle {
                         const int n = this->n_qubits;
                         std::vector<PauliCycle> result;
                         result.reserve(n);
+                        const size_t nw = n_words();
+                        const size_t na = std::min(this->Base.x.size(), this->Base.y.size());
+                        const Coeff coeff = this->Base.coeff * other.Base.coeff;
+                        WordVec rx, ry;
+                        std::vector<uint64_t> px(nw), py(nw);
                         for (int b = 0; b < n; ++b) {
-                                result.emplace_back(n, this->Base * other.rotate(b));
+                                rotate_words_into(other.Base.x, n, b, rx);
+                                rotate_words_into(other.Base.y, n, b, ry);
+                                const int power_of_i = multiply_symplectic_words(
+                                        this->Base.x.data(), this->Base.y.data(), na, rx.data(), ry.data(), nw,
+                                        px.data(), py.data());
+                                // as in PauliString::operator*
+                                Coeff c = coeff;
+                                if (power_of_i & 1) {
+                                        c *= std::complex<double>(0.0, 1.0);
+                                }
+                                if (power_of_i & 2) {
+                                        c = -c;
+                                }
+                                result.push_back(PauliCycle(n, PauliString<Coeff>(WordVec(px), WordVec(py), c), trusted_t{}));
                         }
                         return PauliCycleSum<Coeff>(std::move(result));
                 }
@@ -241,11 +330,27 @@ class PauliCycle {
 
                         const std::vector<int> shifts = overlap_shifts(other);
                         result.reserve(shifts.size());
+                        const size_t nw = n_words();
+                        WordVec rx, ry;
+                        std::vector<uint64_t> px(nw), py(nw);
+                        const size_t na = std::min(this->Base.x.size(), this->Base.y.size());
                         for (int k : shifts) {
-                                PauliString<Coeff> term = this->Base.commutator(other.rotate(k));
-
+                                rotate_words_into(other.Base.x, n, k, rx);
+                                rotate_words_into(other.Base.y, n, k, ry);
+                                uint64_t anti = 0;
+                                for (size_t w = 0; w < na; ++w) {
+                                        anti ^= (this->Base.x[w] & ry[w]) ^ (rx[w] & this->Base.y[w]);
+                                }
+                                if ((std::popcount(anti) & 1) == 0) {
+                                        continue;  // commuting: no commutator term
+                                }
+                                const int power_of_i = multiply_symplectic_words(
+                                        this->Base.x.data(), this->Base.y.data(), na, rx.data(), ry.data(), nw,
+                                        px.data(), py.data());
+                                PauliString<Coeff> term(WordVec(px), WordVec(py),
+                                        PauliString<Coeff>::commutator_coeff(this->Base.coeff, other.Base.coeff, power_of_i));
                                 if (!pauliengine_detail::coeff_is_zero(term.coeff)) {
-                                        result.emplace_back(n, term);
+                                        result.push_back(PauliCycle(n, std::move(term), trusted_t{}));
                                 }
                         }
                         return PauliCycleSum<Coeff>(std::move(result));
@@ -295,8 +400,8 @@ class PauliCycle {
                                         continue;  // commuting: no commutator term
                                 }
                                 unify_words(cx, cy, n, ux, uy);
-                                if (cmp_words(ux, target.unified_x_, nw) != 0
-                                    || cmp_words(uy, target.unified_y_, nw) != 0) {
+                                if (cmp_words(ux, target.ux(), nw) != 0
+                                    || cmp_words(uy, target.uy(), nw) != 0) {
                                         continue;
                                 }
                                 total = total + PauliString<Coeff>::commutator_coeff(
@@ -349,6 +454,11 @@ class PauliCycle {
                                         if (!seen[k]) {
                                                 seen[k] = 1;
                                                 shifts.push_back(k);
+                                                // Every shift found (typical for dense bases):
+                                                // the remaining pairs can add nothing.
+                                                if (shifts.size() == static_cast<size_t>(n)) {
+                                                        return shifts;
+                                                }
                                         }
                                 }
                         }
@@ -363,6 +473,12 @@ class PauliCycle {
                 mutable bool unified_valid_ = false;
                 mutable WordVec unified_x_;
                 mutable WordVec unified_y_;
+                /// Base itself is the unified representative (after unify(), and for the
+                /// summands of sparse sum products), so no copy of it is cached.
+                bool base_unified_ = false;
+                /// The unified words, from Base or the cache; call ensure_unified() first.
+                const WordVec& ux() const { return base_unified_ ? Base.x : unified_x_; }
+                const WordVec& uy() const { return base_unified_ ? Base.y : unified_y_; }
 
                 /// A rotation orbit is determined by the cyclic sequence of
                 /// (gap to the next non-identity site, Pauli) pairs along the support:
@@ -372,7 +488,7 @@ class PauliCycle {
                 /// Cost O(n / 64 + w) for weight w, instead of comparing all n
                 /// rotations (O(n^2 / 64)).
                 void ensure_unified() const {
-                        if (unified_valid_) {
+                        if (unified_valid_ || base_unified_) {
                                 return;
                         }
                         unify_words(Base.x, Base.y, n_qubits, unified_x_, unified_y_);
@@ -388,29 +504,47 @@ class PauliCycle {
                         ux = WordVec(nw);
                         uy = WordVec(nw);
 
-                        const std::vector<int> pos = support_words(x, y);
-                        const size_t w = pos.size();
-                        if (w > 0) {
-                                // item = gap << 2 | pauli, with pauli = x_bit | y_bit << 1
-                                std::vector<uint64_t> items(w);
-                                for (size_t i = 0; i < w; ++i) {
-                                        const int gap = (i + 1 < w ? pos[i + 1] : pos[0] + n) - pos[i];
-                                        const uint64_t pauli = (bit_at(x, pos[i]) ? 1ULL : 0ULL)
-                                                | (bit_at(y, pos[i]) ? 2ULL : 0ULL);
-                                        items[i] = (static_cast<uint64_t>(gap) << 2) | pauli;
-                                }
-                                const size_t start = least_rotation(items);
-                                int q = 0;
-                                for (size_t t = 0; t < w; ++t) {
-                                        const uint64_t item = items[(start + t) % w];
-                                        if (item & 1ULL) {
-                                                set_bit(ux, q);
+                        // item = gap << 2 | pauli, with pauli = x_bit | y_bit << 1, in one pass
+                        // over the words; the last gap wraps around to the first site.
+                        thread_local std::vector<uint64_t> items;
+                        items.clear();
+                        const size_t words = std::min(x.size(), y.size());
+                        long long first = -1;
+                        long long prev = -1;
+                        uint64_t prev_pauli = 0;
+                        for (size_t w = 0; w < words; ++w) {
+                                uint64_t bits = x[w] | y[w];
+                                while (bits) {
+                                        const int b = std::countr_zero(bits);
+                                        const long long pos = static_cast<long long>(w * BITS_IN_INTEGER) + b;
+                                        const uint64_t pauli = ((x[w] >> b) & 1ULL) | (((y[w] >> b) & 1ULL) << 1);
+                                        if (prev >= 0) {
+                                                items.push_back((static_cast<uint64_t>(pos - prev) << 2) | prev_pauli);
+                                        } else {
+                                                first = pos;
                                         }
-                                        if (item & 2ULL) {
-                                                set_bit(uy, q);
-                                        }
-                                        q += static_cast<int>(item >> 2);
+                                        prev = pos;
+                                        prev_pauli = pauli;
+                                        bits &= bits - 1;
                                 }
+                        }
+                        if (prev < 0) {
+                                return;
+                        }
+                        items.push_back((static_cast<uint64_t>(first + n - prev) << 2) | prev_pauli);
+                        const size_t w = items.size();
+                        const size_t start = least_rotation(items);
+                        int q = 0;
+                        for (size_t t = 0; t < w; ++t) {
+                                const size_t at = start + t < w ? start + t : start + t - w;
+                                const uint64_t item = items[at];
+                                if (item & 1ULL) {
+                                        set_bit(ux, q);
+                                }
+                                if (item & 2ULL) {
+                                        set_bit(uy, q);
+                                }
+                                q += static_cast<int>(item >> 2);
                         }
                 }
 
@@ -428,8 +562,11 @@ class PauliCycle {
                         const size_t m = s.size();
                         size_t i = 0, j = 1, k = 0;
                         while (i < m && j < m && k < m) {
-                                const uint64_t a = s[(i + k) % m];
-                                const uint64_t b = s[(j + k) % m];
+                                // i, j, k < m, so one subtraction replaces the modulo
+                                const size_t ia = i + k < m ? i + k : i + k - m;
+                                const size_t jb = j + k < m ? j + k : j + k - m;
+                                const uint64_t a = s[ia];
+                                const uint64_t b = s[jb];
                                 if (a == b) {
                                         ++k;
                                         continue;
@@ -450,8 +587,16 @@ class PauliCycle {
                 /// Rotate the n-bit vector `in` by `shift` (0 <= shift < n) bits:
                 /// out = ((in << shift) | (in >> (n - shift))) restricted to n bits.
                 static WordVec rotate_words(const WordVec& in, int n, int shift) {
+                        WordVec out;
+                        rotate_words_into(in, n, shift, out);
+                        return out;
+                }
+
+                /// rotate_words() into `out`, which is resized to ceil(n / 64) words and
+                /// keeps its memory between calls.
+                static void rotate_words_into(const WordVec& in, int n, int shift, WordVec& out) {
                         const size_t nw = (static_cast<size_t>(n) + BITS_IN_INTEGER - 1) / BITS_IN_INTEGER;
-                        WordVec out(nw);
+                        out.resize(nw);
                         const auto get = [&in](long long i) -> uint64_t {
                                 return (i >= 0 && static_cast<size_t>(i) < in.size()) ? in[static_cast<size_t>(i)] : 0ULL;
                         };
@@ -478,7 +623,6 @@ class PauliCycle {
                         if (tail != 0) {
                                 out[nw - 1] &= (1ULL << tail) - 1ULL;
                         }
-                        return out;
                 }
 
                 size_t n_words() const {
@@ -497,8 +641,14 @@ class PauliCycle {
                 }
 
 
+                /// Mixes the words of v up to its last non-zero one, so a trimmed base and
+                /// full-length unified words of the same operator hash alike.
                 static void mix_words(size_t& h, const WordVec& v) {
-                        for (size_t i = 0; i < v.size(); ++i) {
+                        size_t used = v.size();
+                        while (used > 0 && v[used - 1] == 0) {
+                                --used;
+                        }
+                        for (size_t i = 0; i < used; ++i) {
                                 h ^= std::hash<uint64_t>{}(v[i]) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
                         }
                 }

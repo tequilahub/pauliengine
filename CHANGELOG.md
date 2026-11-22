@@ -131,10 +131,37 @@ Pauli decomposition of matrices.
   products is sorted. Faster with one thread and especially with several.
   Commutators with few anti-commuting pairs keep a simple scan. Results do not depend
   on the number of threads.
+- Much faster commutators of complex `QubitHamiltonian`s with local terms on many
+  qubits (up to about 15x): only strings that share a qubit can anti-commute, so when
+  few pairs share one, the scan tests only those, found through an index of the second
+  operand by qubit. The pairs are tested in the same order, so results are unchanged.
+- Commutators of complex `QubitHamiltonian`s with strings beyond 512 qubits and few
+  anti-commuting pairs no longer reserve memory for all `n1 * n2` pairs, which made
+  large ones fail; memory now follows the pairs found. Results are unchanged.
 - Symbolic `QubitHamiltonian` products, commutators and squares group pairs by operator
   first, so each pair costs one SymEngine product.
 - `unweighted_QubitHamiltonian` products and commutators use the prefix-partitioned
   product with several threads; elements, order and phases are unchanged.
+- Faster `PauliCycle` commutators and products, much faster for dense bases. Merging
+  into a `PauliCycleSum` first compares a cheap rotation-invariant signature (numbers of
+  X, Y, Z and of adjacent Pauli pairs) and unifies only cycles whose signatures
+  collide; the overlapping shifts of dense bases are found in O(n), product cycles are
+  not validated again, and the unified form is computed in one pass. Results, including
+  the order of the summands, are unchanged.
+- Much faster products and commutators of `PauliCycleSum`s whose bases act on few
+  sites. They are formed on sorted site lists instead of words: a rotation cuts a list
+  at one place, a product merges two lists, and the rotation class of a product comes
+  straight from its gaps and Paulis. Classes are merged in flat tables, words are formed
+  only for the summands of the result, and with complex coefficients the pairs and the
+  merging run on several threads. The summands, their order and their coefficients are
+  the same for any number of threads and unchanged; the base of every summand is now
+  the unified representative of its cycle (as after `unify()`), which the merging finds
+  anyway, so it is stored once and `unify()` has nothing left to do. Sums with dense
+  bases take the previous route.
+- Faster `PauliOrbit` commutators, products and targeted commutators, most for heavy
+  labels. Output labels are collected in a flat per-thread table instead of a hash map,
+  and the commutator skips whole innermost loops of commuting overlap tables. Results,
+  including the order of the summands, are unchanged.
 - C++ only: internal helpers (`WordVec`, the coefficient helpers, the flat term storage
   and the product kernel) live in `include/pauliengine/detail/`; the public headers
   include them as before. `PauliCycleSum.h` and `PauliOrbitSum.h` now hold the member

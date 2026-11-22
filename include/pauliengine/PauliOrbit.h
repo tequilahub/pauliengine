@@ -180,18 +180,15 @@ class PauliOrbit {
 
                         std::vector<std::array<int, 3>> keys;
                         std::vector<double> vals;
-                        std::unordered_map<int, size_t> index;
+                        LabelIndex index(label_bound(other), keys);
                         // Only anticommuting tables (D odd) contribute; each carries the
                         // real sign (-1)^{E + (D-1)/2 + 1} (verified against the expanded
                         // operator algebra).
-                        for_each_overlap_table(other,
+                        for_each_overlap_table<true>(other,
                                 [&](int pt, int qt, int rt, int E, int D, double W) {
-                                        if ((D & 1) == 0) {
-                                                return;
-                                        }
                                         const int expo = E + (D - 1) / 2 + 1;
                                         const double sgn = (expo & 1) ? -1.0 : 1.0;
-                                        accumulate_term(keys, vals, index, n, pt, qt, rt, sgn * W);
+                                        accumulate_term(keys, vals, index, pt, qt, rt, sgn * W);
                                 });
 
                         for (size_t k = 0; k < keys.size(); ++k) {
@@ -232,8 +229,8 @@ class PauliOrbit {
 
                         std::vector<std::array<int, 3>> keys;
                         std::vector<std::complex<double>> vals;
-                        std::unordered_map<int, size_t> index;
-                        for_each_overlap_table(other,
+                        LabelIndex index(label_bound(other), keys);
+                        for_each_overlap_table<false>(other,
                                 [&](int pt, int qt, int rt, int E, int D, double W) {
                                         // phase = (-1)^E * i^{D+1}
                                         std::complex<double> phase;
@@ -246,7 +243,7 @@ class PauliOrbit {
                                         if (E & 1) {
                                                 phase = -phase;
                                         }
-                                        accumulate_term(keys, vals, index, n, pt, qt, rt, phase * W);
+                                        accumulate_term(keys, vals, index, pt, qt, rt, phase * W);
                                 });
 
                         for (size_t k = 0; k < keys.size(); ++k) {
@@ -266,7 +263,7 @@ class PauliOrbit {
                         const int n = n_qubits;
 
                         const int p1 = p, q1 = q, r1 = r, s1 = n - p1 - q1 - r1;
-                        const int p2 = other.p, q2 = other.q, r2 = other.r, s2 = n - p2 - q2 - r2;
+                        const int p2 = other.p, q2 = other.q, r2 = other.r;
                         const int tp = target.p, tq = target.q, tr = target.r;
 
                         const double fn = factorial_table(n)[n];
@@ -288,9 +285,9 @@ class PauliOrbit {
                         const double split_cost = compositions4(tp) * compositions4(tq) * compositions4(tr);
                         const double table_cost = compositions4(p1) * compositions4(q1) * compositions4(r1);
                         if (table_cost <= split_cost) {
-                                for_each_overlap_table(other,
+                                for_each_overlap_table<true>(other,
                                         [&](int pt, int qt, int rt, int E, int D, double W) {
-                                                if ((D & 1) == 0 || pt != tp || qt != tq || rt != tr) {
+                                                if (pt != tp || qt != tq || rt != tr) {
                                                         return;
                                                 }
                                                 const int expo = E + (D - 1) / 2 + 1;
@@ -366,24 +363,71 @@ class PauliOrbit {
                         }
                 }
 
-                /// Adds w to the output label (pt, qt, rt), O(1) via a label index.
+                /// Largest p, q or r an output label of this with `other` can have: each
+                /// is a sum of table cells of both labels, and at most n.
+                int label_bound(const PauliOrbit& other) const {
+                        return std::min(n_qubits, p + q + r + other.p + other.q + other.r);
+                }
+
+                /// Position of every output label of one call in `keys`, kept in a flat
+                /// per-thread table over all labels with p, q, r <= bound (-1: not seen
+                /// yet). Only the entries of the labels in `keys` are set, and they are
+                /// reset when the call ends, so the table is clean for the next call.
+                class LabelIndex {
+                    public:
+                        LabelIndex(int bound, const std::vector<std::array<int, 3>>& keys)
+                                : side_(static_cast<size_t>(bound) + 1), keys_(keys) {
+                                std::vector<int32_t>& t = table();
+                                const size_t need = side_ * side_ * side_;
+                                if (t.size() < need) {
+                                        t.resize(need, -1);
+                                }
+                        }
+                        ~LabelIndex() {
+                                std::vector<int32_t>& t = table();
+                                for (const auto& k : keys_) {
+                                        t[cell(k[0], k[1], k[2])] = -1;
+                                }
+                        }
+                        LabelIndex(const LabelIndex&) = delete;
+                        LabelIndex& operator=(const LabelIndex&) = delete;
+
+                        int32_t& at(int pt, int qt, int rt) { return table()[cell(pt, qt, rt)]; }
+
+                    private:
+                        size_t cell(int pt, int qt, int rt) const {
+                                return (static_cast<size_t>(pt) * side_ + static_cast<size_t>(qt)) * side_
+                                        + static_cast<size_t>(rt);
+                        }
+                        static std::vector<int32_t>& table() {
+                                thread_local std::vector<int32_t> t;
+                                return t;
+                        }
+                        size_t side_;
+                        const std::vector<std::array<int, 3>>& keys_;
+                };
+
+                /// Adds w to the output label (pt, qt, rt), O(1) via the label index.
                 template <typename T>
                 static void accumulate_term(std::vector<std::array<int, 3>>& keys,
                                             std::vector<T>& vals,
-                                            std::unordered_map<int, size_t>& index,
-                                            int n, int pt, int qt, int rt, T w) {
-                        const int key = (pt * (n + 1) + qt) * (n + 1) + rt;
-                        const auto [it, inserted] = index.try_emplace(key, keys.size());
-                        if (!inserted) {
-                                vals[it->second] += w;
+                                            LabelIndex& index,
+                                            int pt, int qt, int rt, T w) {
+                        int32_t& slot = index.at(pt, qt, rt);
+                        if (slot >= 0) {
+                                vals[static_cast<size_t>(slot)] += w;
                                 return;
                         }
+                        slot = static_cast<int32_t>(keys.size());
                         keys.push_back({pt, qt, rt});
                         vals.push_back(w);
                 }
 
 
-                template <typename F>
+                /// Calls fn(pt, qt, rt, E, D, W) for every contingency table of the two
+                /// labels; with OddOnly, only for tables with odd D (anti-commuting pairs).
+                /// D does not depend on the innermost cells, so those loops are skipped whole.
+                template <bool OddOnly, typename F>
                 void for_each_overlap_table(const PauliOrbit& other, F&& fn) const {
                         const int n = n_qubits;
                         const int p1 = p, q1 = q, r1 = r;
@@ -422,6 +466,8 @@ class PauliOrbit {
                                       const int nIX = dp2 - nZX;
                                       const double rowXY_X = rowXY * inv[nZX] * inv[nIX];
                                       for (int nZY = std::max(0, rZ1 - (dr2 + ds2)); nZY <= std::min(rZ1, dq2); ++nZY) {
+                                        const int D = nXY + nXZ + nYX + nYZ + nZX + nZY;
+                                        if (OddOnly && (D & 1) == 0) continue;
                                         const int rZ2 = rZ1 - nZY;
                                         const int nIY = dq2 - nZY;
                                         const double rowXY_XY = rowXY_X * inv[nZY] * inv[nIY];
@@ -430,7 +476,6 @@ class PauliOrbit {
                                           const int nIZ = dr2 - nZZ;
                                           const int nII = ds2 - nZI;
 
-                                          const int D = nXY + nXZ + nYX + nYZ + nZX + nZY;
                                           const int pt = nXI + nIX + nYZ + nZY;
                                           const int qt = nYI + nIY + nZX + nXZ;
                                           const int rt = nZI + nIZ + nXY + nYX;
