@@ -4,7 +4,7 @@ PauliEngine
 **Fast arithmetic for quantum operators.** A C++ core with a nanobind Python
 frontend for Pauli strings, qubit Hamiltonians and symmetry-adapted operator
 bases (Pauli cycles and Pauli orbits). Coefficients can be numeric
-(``std::complex<double>``) or fully symbolic (SymEngine).
+(``std::complex<double>``) or symbolic (polynomials in named parameters).
 
 - Products, commutators and targeted commutators in the binary symplectic
   representation, also directly in the cycle and orbit bases.

@@ -107,8 +107,5 @@ configure_file(
   ${PROJECT_BINARY_DIR}/include/pauliengine/Info.h
 )
 
-# Conan Toolchain einbinden (nach: conan install .. --install-folder=build --build=missing)
-include(${CMAKE_BINARY_DIR}/conan_toolchain.cmake OPTIONAL RESULT_VARIABLE _found)
-
 add_subdirectory(src)
 

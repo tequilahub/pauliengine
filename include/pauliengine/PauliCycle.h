@@ -17,7 +17,7 @@
 
 
 /// Represents a Pauli string with a coefficient of type Coeff (std::complex<double>
-/// or SymEngine::Expression) together with all of its cyclic rotations on
+/// or symbolic::Expression) together with all of its cyclic rotations on
 /// `n_qubits` qubits, i.e. the operator
 ///
 ///     C(P) = coeff * sum_{k=0}^{n-1} R^k P        (R = cyclic shift by one qubit)

@@ -21,7 +21,7 @@ def _is_symbolic_coeff(coeff: Any) -> bool:
 
 
 def _as_expression(coeff: Any) -> Expression:
-    """A coefficient as a SymEngine Expression."""
+    """A coefficient as a symbolic Expression."""
     if isinstance(coeff, Expression):
         return coeff
     if isinstance(coeff, str):

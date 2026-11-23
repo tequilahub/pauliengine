@@ -11,20 +11,15 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <symengine/expression.h>
-#include <symengine/symbol.h>
-#include <symengine/complex.h>
-#include <symengine/visitor.h>
+#include "pauliengine/Polynomial.h"
 
-using namespace SymEngine;
-using SymEngine::Expression;
+using pauliengine::symbolic::Expression;
 
 #define BITS_IN_INTEGER (sizeof(uint64_t) * 8)
 
 const std::complex<double> I(0.0 , 1.0);
 
 inline int popcount(uint64_t x);
-void testSymengine();
 //TODO: hashable 
 
 
@@ -372,9 +367,7 @@ class PauliString {
                         if constexpr (std::is_same<Coeff, std::complex<double>>::value) {
                                 return this->coeff == other.coeff;
                         } else {
-                                const Expression difference = expand(this->coeff - other.coeff);
-                                const auto& basic = *difference.get_basic();
-                                return is_a_Number(basic) && down_cast<const Number&>(basic).is_zero();
+                                return this->coeff == other.coeff;  // polynomials are canonical
                         }
                 }
 
@@ -567,7 +560,7 @@ class PauliString {
                         if constexpr (std::is_same<Coeff, std::complex<double>>::value) {
                                 oss << std::to_string(this->coeff.real()) + " + " + std::to_string(this->coeff.imag()) + "i : ";
                         } else {
-                                oss << str(this->coeff) << " : ";
+                                oss << this->coeff.str() << " : ";
                         }
 
                         for (size_t i = 0; i < num_qubits; ++i) {
@@ -802,19 +795,11 @@ class PauliString {
                 }
 
                 PauliString diff(const std::string& symbol_name) const{
-                        Coeff coeff_diff = this->coeff.diff(symbol(symbol_name));
-                        return PauliString(this->x, this->y, coeff_diff);
+                        return PauliString(this->x, this->y, this->coeff.diff(symbol_name));
                 }
 
                 PauliString substitute(const std::unordered_map<std::string, std::complex<double>>& substitution_map) const {
-                        map_basic_basic substitutions;
-                        for (const auto& [symbol_string, value] : substitution_map) {
-                                Expression temp = value;
-                                RCP<const Basic> basic_ptr = temp.get_basic();
-                                substitutions[symbol(symbol_string)] = basic_ptr;
-                        }
-                        Coeff temp = this->coeff.subs(substitutions);
-                        return PauliString(x, y, temp);
+                        return PauliString(x, y, this->coeff.subs(substitution_map));
                 }
 
                 PauliString copy() const{
@@ -829,28 +814,9 @@ class PauliString {
                         return expr;
                 }
 
+                /// Value of a numeric expression; throws std::runtime_error if symbols are left.
                 static std::complex<double> to_complex(const Expression &expr) {
-                        const auto &basic = *expr.get_basic();
-
-                        if (is_a<RealDouble>(basic)) {
-                                const auto &rd = down_cast<const RealDouble &>(basic);
-                                return { rd.as_double(), 0.0 };
-                        }
-                        else if (is_a<ComplexDouble>(basic)) {
-                                const auto &cd = down_cast<const ComplexDouble &>(basic);
-                                return {
-                                eval_double(*cd.real_part()),
-                                eval_double(*cd.imaginary_part())
-                                };
-                        }
-                        else {
-                                try {
-                                double val = eval_double(basic);
-                                return { val, 0.0 };
-                                } catch (...) {
-                                throw std::runtime_error("Expression cannot be converted to std::complex<double>.");
-                                }
-                        }
+                        return expr.to_complex();
                 }
 
         private:

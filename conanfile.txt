@@ -1,6 +1,0 @@
-[requires]
-symengine/0.14.0
-
-[generators]
-CMakeDeps
-CMakeToolchain

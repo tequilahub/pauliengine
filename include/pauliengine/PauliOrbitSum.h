@@ -13,7 +13,7 @@ class PauliOrbit;
 /// A scalar-weighted sum of Pauli orbits, sum_i coeffs[i] * data[i]
 /// (arXiv:2604.16701, Section V). See PauliOrbit.h for the orbit data structure.
 ///
-/// Coeff is std::complex<double> or SymEngine::Expression. Commutators of the
+/// Coeff is std::complex<double> or symbolic::Expression. Commutators of the
 /// (anti-Hermitian) orbits have real structure constants, but ordinary products
 /// carry a full complex Pauli phase (see PauliOrbit::operator*); a symbolic sum
 /// multiplies these numeric constants into its symbolic coefficients.

@@ -63,17 +63,13 @@ static std::vector<uint64_t> hash_int_to_limbs(const nb::int_& value) {
 
 
 using PSC = PauliString<std::complex<double>>;
-using PSS = PauliString<SymEngine::Expression>;
+using PSS = PauliString<Expression>;
 using QHC = QubitHamiltonian<std::complex<double>>;
-using QHS = QubitHamiltonian<SymEngine::Expression>;
+using QHS = QubitHamiltonian<Expression>;
 
 // Whether a coefficient returned by contains() is non-zero (for `in`).
 static bool coeff_nonzero(const std::complex<double>& c) { return c != std::complex<double>(0.0, 0.0); }
-static bool coeff_nonzero(const SymEngine::Expression& c) {
-        const SymEngine::Expression e = SymEngine::expand(c.get_basic());
-        const auto& b = *e.get_basic();
-        return !(SymEngine::is_a_Number(b) && SymEngine::down_cast<const SymEngine::Number&>(b).is_zero());
-}
+static bool coeff_nonzero(const Expression& c) { return !c.is_zero(); }
 
 // Register a * s and s * a of class A for an int or float s.
 template <typename A, typename Cls>
@@ -124,11 +120,11 @@ void bind_contains_unweighted(ClsH& cls_h) {
 
 
 using CYC = PauliCycle<std::complex<double>>;
-using CYS = PauliCycle<SymEngine::Expression>;
+using CYS = PauliCycle<Expression>;
 using CSC = PauliCycleSum<std::complex<double>>;
-using CSS = PauliCycleSum<SymEngine::Expression>;
+using CSS = PauliCycleSum<Expression>;
 using OSC = PauliOrbitSum<std::complex<double>>;
-using OSS = PauliOrbitSum<SymEngine::Expression>;
+using OSS = PauliOrbitSum<Expression>;
 
 template <typename... Ts>
 struct TypeList {};
@@ -287,11 +283,11 @@ auto bind_orbit_sum(nb::module_& m, const char* name, const char* doc) {
                 .def("add", &Sum::add, nb::arg("orbit"), nb::arg("coeff"),
                         "Add coeff * orbit in place, merging into an existing term with the same label. "
                         "Raises ValueError if orbit.n_qubits differs.");
-        if constexpr (std::is_same_v<C, SymEngine::Expression>) {
-                cls.def("add", [](Sum& s, const PauliOrbit& o, const std::string& coeff) { s.add(o, SymEngine::Expression(coeff)); },
+        if constexpr (std::is_same_v<C, Expression>) {
+                cls.def("add", [](Sum& s, const PauliOrbit& o, const std::string& coeff) { s.add(o, Expression(coeff)); },
                         nb::arg("orbit"), nb::arg("coeff"),
                         "Add coeff * orbit in place; the coefficient is parsed like 'a*b'.")
-                   .def("add", [](Sum& s, const PauliOrbit& o, std::complex<double> coeff) { s.add(o, SymEngine::Expression(coeff)); },
+                   .def("add", [](Sum& s, const PauliOrbit& o, std::complex<double> coeff) { s.add(o, Expression(coeff)); },
                         nb::arg("orbit"), nb::arg("coeff"),
                         "Add coeff * orbit in place, with a numeric coefficient.");
         }
@@ -374,9 +370,9 @@ NB_MODULE(_core, m) {
                 .def("__rmul__", [](const PauliString<std::complex<double>>& ps, const std::complex<double> s){ return ps * s; }, "The Pauli string scaled by a complex number (scalar on the left).")
                 .def("__imul__", nb::overload_cast<const std::complex<double>>(&PauliString<std::complex<double>>::operator*=), "Scale in place by a complex number.")
                 .def("__imul__", nb::overload_cast<const PauliString<std::complex<double>>&>(&PauliString<std::complex<double>>::operator*=), "Multiply in place by another Pauli string.")
-                // Type heterogeneous multiplication with SymEngine::Expression.
-                .def("__mul__", [](const PauliString<std::complex<double>>& ps1, const PauliString<SymEngine::Expression>& ps2){return ps1 * ps2;}, "Product with a symbolic Pauli string; the result is symbolic.")
-                .def("__rmul__", [](const PauliString<std::complex<double>>& self, const PauliString<SymEngine::Expression>& other){return other * self;}, "Product other * self with a symbolic Pauli string; the result is symbolic.")
+                // Type heterogeneous multiplication with Expression.
+                .def("__mul__", [](const PauliString<std::complex<double>>& ps1, const PauliString<Expression>& ps2){return ps1 * ps2;}, "Product with a symbolic Pauli string; the result is symbolic.")
+                .def("__rmul__", [](const PauliString<std::complex<double>>& self, const PauliString<Expression>& other){return other * self;}, "Product other * self with a symbolic Pauli string; the result is symbolic.")
                 .def("__repr__",  &PauliString<std::complex<double>>::to_string, "Human-readable form, e.g. '1.000000 + 0.000000i : X(0)Z(2)'.")
                 .def("__str__",  &PauliString<std::complex<double>>::to_string, "Human-readable form, e.g. '1.000000 + 0.000000i : X(0)Z(2)'.")
                 .def("__eq__", &PauliString<std::complex<double>>::operator==, "True if both the operator and the coefficient are equal (see equals() for the operator only).")
@@ -387,18 +383,18 @@ NB_MODULE(_core, m) {
                 .def("__add__", [](const PauliString<std::complex<double>>& ps1, const PauliString<std::complex<double>>& ps2){
                         return QubitHamiltonian<std::complex<double>>({ps1, ps2});
                 }, "Add two PauliStringComplex to get QubitHamiltonianComplex")
-                .def("__add__", [](const PauliString<std::complex<double>>& ps1, const PauliString<SymEngine::Expression>& ps2){
-                        SymEngine::Expression sym_coeff = ps1.coeff;
-                        PauliString<SymEngine::Expression> ps1_sym(ps1.x, ps1.y, sym_coeff);
-                        return QubitHamiltonian<SymEngine::Expression>({ps1_sym, ps2});
+                .def("__add__", [](const PauliString<std::complex<double>>& ps1, const PauliString<Expression>& ps2){
+                        Expression sym_coeff = ps1.coeff;
+                        PauliString<Expression> ps1_sym(ps1.x, ps1.y, sym_coeff);
+                        return QubitHamiltonian<Expression>({ps1_sym, ps2});
                 }, "Add PauliStringComplex and PauliStringSymbolic to get QubitHamiltonianSymbolic")
                 .def("__sub__", [](const PauliString<std::complex<double>>& ps1, const PauliString<std::complex<double>>& ps2){
                         return QubitHamiltonian<std::complex<double>>({ps1, ps2 * -1});
                 }, "Subtract two PauliStringComplex to get QubitHamiltonianComplex")
-                .def("__sub__", [](const PauliString<std::complex<double>>& ps1, const PauliString<SymEngine::Expression>& ps2){
-                        SymEngine::Expression sym_coeff = ps1.coeff;
-                        PauliString<SymEngine::Expression> ps1_sym(ps1.x, ps1.y, sym_coeff);
-                        return QubitHamiltonian<SymEngine::Expression>({ps1_sym, ps2 * -1});
+                .def("__sub__", [](const PauliString<std::complex<double>>& ps1, const PauliString<Expression>& ps2){
+                        Expression sym_coeff = ps1.coeff;
+                        PauliString<Expression> ps1_sym(ps1.x, ps1.y, sym_coeff);
+                        return QubitHamiltonian<Expression>({ps1_sym, ps2 * -1});
                 }, "Subtract PauliStringComplex and PauliStringSymbolic to get QubitHamiltonianSymbolic")
                 .def("qubits", &PauliString<std::complex<double>>::qubits, "Sorted list of the qubits with a non-identity operator.")
                 .def("equals", &PauliString<std::complex<double>>::equals, "True if the operators are equal, ignoring the coefficients.")
@@ -422,99 +418,96 @@ NB_MODULE(_core, m) {
                 .def_prop_ro("is_zero", [](const PauliString<std::complex<double>>& ps) { return ps.coeff == std::complex<double>(0.0, 0.0); },
                         "True if the coefficient is zero.");
 
-        // PauliString for SymEngine::Expression coefficients
-        auto cls_pss = nb::class_<PauliString<SymEngine::Expression>>(m, "PauliStringSymbolic", "A Pauli string with a symbolic (SymEngine) coefficient, stored in binary symplectic form (x and y bit vectors).")
+        // PauliString for Expression coefficients
+        auto cls_pss = nb::class_<PauliString<Expression>>(m, "PauliStringSymbolic", "A Pauli string with a symbolic (polynomial) coefficient, stored in binary symplectic form (x and y bit vectors).")
                 .def(nb::init<>(), "The zero Pauli string (identity operator, coefficient 0).")
-                .def(nb::init<SymEngine::Expression, const std::unordered_map<int, std::string>&>(),
+                .def(nb::init<Expression, const std::unordered_map<int, std::string>&>(),
                 "From a symbolic coefficient (Expression) and a map {qubit: 'X'/'Y'/'Z'/'I'}.")
-                .def(nb::init<SymEngine::Expression&, const std::string&>(),
+                .def(nb::init<Expression&, const std::string&>(),
                 "From a symbolic coefficient (Expression) and a text: dense such as 'XIZ' (character i acts on qubit i) or sparse such as 'X0 Z2'.")
-                .def(nb::init<const std::pair<SymEngine::Expression, std::vector<std::pair<char, int>>>>(),
+                .def(nb::init<const std::pair<Expression, std::vector<std::pair<char, int>>>>(),
                 "From an OpenFermion-style pair (Expression, [('X', qubit), ...]).")
-                .def("to_string", &PauliString<SymEngine::Expression>::to_string, "Human-readable form, e.g. '1.000000 + 0.000000i : X(0)Z(2)'.")
-                .def("is_all_z", &PauliString<SymEngine::Expression>::is_all_z, "True if every non-identity operator is Z.")
-                .def("get_coeff", &PauliString<SymEngine::Expression>::get_coeff, "The coefficient of the Pauli string.")
-                .def("to_dictionary", &PauliString<SymEngine::Expression>::to_dictionary, "The Pauli string as a (coefficient, {qubit: 'X'/'Y'/'Z'}) pair.")
-                .def("commutator", &PauliString<SymEngine::Expression>::commutator, "Commutator [self, other] = self*other - other*self (a single Pauli string, zero if they commute).")
-                .def("targeted_commutator", &PauliString<SymEngine::Expression>::targeted_commutator,
+                .def("to_string", &PauliString<Expression>::to_string, "Human-readable form, e.g. '1.000000 + 0.000000i : X(0)Z(2)'.")
+                .def("is_all_z", &PauliString<Expression>::is_all_z, "True if every non-identity operator is Z.")
+                .def("get_coeff", &PauliString<Expression>::get_coeff, "The coefficient of the Pauli string.")
+                .def("to_dictionary", &PauliString<Expression>::to_dictionary, "The Pauli string as a (coefficient, {qubit: 'X'/'Y'/'Z'}) pair.")
+                .def("commutator", &PauliString<Expression>::commutator, "Commutator [self, other] = self*other - other*self (a single Pauli string, zero if they commute).")
+                .def("targeted_commutator", &PauliString<Expression>::targeted_commutator,
                         nb::arg("other"), nb::arg("target"),
                         "Coefficient of target's operator in [self, other] (0 if absent); target's coefficient is ignored.")
                 .def("trace_out_qubits",
                         nb::overload_cast<const std::vector<int>&, const std::vector<int>&>(
-                                &PauliString<SymEngine::Expression>::trace_out_qubits, nb::const_),
+                                &PauliString<Expression>::trace_out_qubits, nb::const_),
                         "Project onto a computational-basis state of the listed qubits (state[i] in {0, 1}).")
                 .def("trace_out_qubits",
                         nb::overload_cast<const std::vector<int>&, const std::vector<std::pair<std::complex<double>, std::complex<double>>>&>(
-                                &PauliString<SymEngine::Expression>::trace_out_qubits, nb::const_),
+                                &PauliString<Expression>::trace_out_qubits, nb::const_),
                         "Project onto general single-qubit states (a, b) representing a|0>+b|1> per traced qubit.")
-                .def("map_qubits", &PauliString<SymEngine::Expression>::map_qubits, "Copy with qubit indices remapped by {old: new}; an occupied target that is not itself remapped is swapped.")
+                .def("map_qubits", &PauliString<Expression>::map_qubits, "Copy with qubit indices remapped by {old: new}; an occupied target that is not itself remapped is swapped.")
                 // Type homogeneous multiplication.
-                .def("__mul__", nb::overload_cast<const PauliString<SymEngine::Expression>&>(&PauliString<SymEngine::Expression>::operator*, nb::const_), "Product of two Pauli strings, including the phase of the Pauli algebra.")
-                .def("__mul__", nb::overload_cast<double>(&PauliString<SymEngine::Expression>::operator*, nb::const_), "The Pauli string scaled by a float.")
-                .def("__mul__", nb::overload_cast<int>(&PauliString<SymEngine::Expression>::operator*, nb::const_), "The Pauli string scaled by a int.")
-                .def("__mul__", nb::overload_cast<const std::complex<double>>(&PauliString<SymEngine::Expression>::operator*, nb::const_), "The Pauli string scaled by a complex number.")
-                .def("__rmul__", [](const PauliString<SymEngine::Expression>& ps, double s){ return ps * s; }, "The Pauli string scaled by a float (scalar on the left).")
-                .def("__rmul__", [](const PauliString<SymEngine::Expression>& ps, int s){ return ps * s; }, "The Pauli string scaled by a int (scalar on the left).")
-                .def("__rmul__", [](const PauliString<SymEngine::Expression>& ps, const std::complex<double> s){ return ps * s; }, "The Pauli string scaled by a complex number (scalar on the left).")
-                .def("__imul__", nb::overload_cast<const std::complex<double>>(&PauliString<SymEngine::Expression>::operator*=), "Scale in place by a complex number.")
-                .def("__imul__", nb::overload_cast<const PauliString<SymEngine::Expression>&>(&PauliString<SymEngine::Expression>::operator*=), "Multiply in place by another Pauli string.")
+                .def("__mul__", nb::overload_cast<const PauliString<Expression>&>(&PauliString<Expression>::operator*, nb::const_), "Product of two Pauli strings, including the phase of the Pauli algebra.")
+                .def("__mul__", nb::overload_cast<double>(&PauliString<Expression>::operator*, nb::const_), "The Pauli string scaled by a float.")
+                .def("__mul__", nb::overload_cast<int>(&PauliString<Expression>::operator*, nb::const_), "The Pauli string scaled by a int.")
+                .def("__mul__", nb::overload_cast<const std::complex<double>>(&PauliString<Expression>::operator*, nb::const_), "The Pauli string scaled by a complex number.")
+                .def("__rmul__", [](const PauliString<Expression>& ps, double s){ return ps * s; }, "The Pauli string scaled by a float (scalar on the left).")
+                .def("__rmul__", [](const PauliString<Expression>& ps, int s){ return ps * s; }, "The Pauli string scaled by a int (scalar on the left).")
+                .def("__rmul__", [](const PauliString<Expression>& ps, const std::complex<double> s){ return ps * s; }, "The Pauli string scaled by a complex number (scalar on the left).")
+                .def("__imul__", nb::overload_cast<const std::complex<double>>(&PauliString<Expression>::operator*=), "Scale in place by a complex number.")
+                .def("__imul__", nb::overload_cast<const PauliString<Expression>&>(&PauliString<Expression>::operator*=), "Multiply in place by another Pauli string.")
                 // Type heterogeneous multiplication with complex coefficients.
-                .def("__mul__", [](const PauliString<SymEngine::Expression>& ps1, const PauliString<std::complex<double>>& ps2){return ps1 * ps2;}, "Product with a complex Pauli string; the result is symbolic.")
-                .def("__rmul__", [](const PauliString<SymEngine::Expression>& self, const PauliString<std::complex<double>>& other){return other * self;}, "Product other * self with a complex Pauli string; the result is symbolic.")
-                .def("__repr__",  &PauliString<SymEngine::Expression>::to_string, "Human-readable form, e.g. '1.000000 + 0.000000i : X(0)Z(2)'.")
-                .def("__str__",  &PauliString<SymEngine::Expression>::to_string, "Human-readable form, e.g. '1.000000 + 0.000000i : X(0)Z(2)'.")
-                .def("__eq__", &PauliString<SymEngine::Expression>::operator==, "True if both the operator and the coefficient are equal (see equals() for the operator only).")
-                .def("__hash__", [](const PauliString<SymEngine::Expression>& ps) {
+                .def("__mul__", [](const PauliString<Expression>& ps1, const PauliString<std::complex<double>>& ps2){return ps1 * ps2;}, "Product with a complex Pauli string; the result is symbolic.")
+                .def("__rmul__", [](const PauliString<Expression>& self, const PauliString<std::complex<double>>& other){return other * self;}, "Product other * self with a complex Pauli string; the result is symbolic.")
+                .def("__repr__",  &PauliString<Expression>::to_string, "Human-readable form, e.g. '1.000000 + 0.000000i : X(0)Z(2)'.")
+                .def("__str__",  &PauliString<Expression>::to_string, "Human-readable form, e.g. '1.000000 + 0.000000i : X(0)Z(2)'.")
+                .def("__eq__", &PauliString<Expression>::operator==, "True if both the operator and the coefficient are equal (see equals() for the operator only).")
+                .def("__hash__", [](const PauliString<Expression>& ps) {
                         return static_cast<Py_ssize_t>(ps.hash());
                 }, "Hash over the operator part (x, y); ignores the coefficient.")
-                .def("__neg__", [](const PauliString<SymEngine::Expression>& ps){ return ps * -1; }, "The Pauli string with negated coefficient.")
-                .def("__add__", [](const PauliString<SymEngine::Expression>& ps1, const PauliString<SymEngine::Expression>& ps2){
-                        return QubitHamiltonian<SymEngine::Expression>({ps1, ps2});
+                .def("__neg__", [](const PauliString<Expression>& ps){ return ps * -1; }, "The Pauli string with negated coefficient.")
+                .def("__add__", [](const PauliString<Expression>& ps1, const PauliString<Expression>& ps2){
+                        return QubitHamiltonian<Expression>({ps1, ps2});
                 }, "Add two PauliStringSymbolic to get QubitHamiltonianSymbolic")
-                .def("__add__", [](const PauliString<SymEngine::Expression>& ps1, const PauliString<std::complex<double>>& ps2){
-                        SymEngine::Expression sym_coeff = ps2.coeff;
-                        PauliString<SymEngine::Expression> ps2_sym(ps2.x, ps2.y, sym_coeff);
-                        return QubitHamiltonian<SymEngine::Expression>({ps1, ps2_sym});
+                .def("__add__", [](const PauliString<Expression>& ps1, const PauliString<std::complex<double>>& ps2){
+                        Expression sym_coeff = ps2.coeff;
+                        PauliString<Expression> ps2_sym(ps2.x, ps2.y, sym_coeff);
+                        return QubitHamiltonian<Expression>({ps1, ps2_sym});
                 }, "Add PauliStringSymbolic and PauliStringComplex to get QubitHamiltonianSymbolic")
-                .def("__sub__", [](const PauliString<SymEngine::Expression>& ps1, const PauliString<SymEngine::Expression>& ps2){
-                        return QubitHamiltonian<SymEngine::Expression>({ps1, ps2 * -1});
+                .def("__sub__", [](const PauliString<Expression>& ps1, const PauliString<Expression>& ps2){
+                        return QubitHamiltonian<Expression>({ps1, ps2 * -1});
                 }, "Subtract two PauliStringSymbolic to get QubitHamiltonianSymbolic")
-                .def("__sub__", [](const PauliString<SymEngine::Expression>& ps1, const PauliString<std::complex<double>>& ps2){
-                        SymEngine::Expression sym_coeff = ps2.coeff;
-                        PauliString<SymEngine::Expression> ps2_sym(ps2.x, ps2.y, sym_coeff);
-                        return QubitHamiltonian<SymEngine::Expression>({ps1, ps2_sym * -1});
+                .def("__sub__", [](const PauliString<Expression>& ps1, const PauliString<std::complex<double>>& ps2){
+                        Expression sym_coeff = ps2.coeff;
+                        PauliString<Expression> ps2_sym(ps2.x, ps2.y, sym_coeff);
+                        return QubitHamiltonian<Expression>({ps1, ps2_sym * -1});
                 }, "Subtract PauliStringSymbolic and PauliStringComplex to get QubitHamiltonianSymbolic")
-                .def("diff", &PauliString<SymEngine::Expression>::diff, "Derivative of the coefficient with respect to the named symbol.")
-                .def("subs", &PauliString<SymEngine::Expression>::substitute, "Substitute values for symbols, given as {name: complex value}.")
-                .def("qubits", &PauliString<SymEngine::Expression>::qubits, "Sorted list of the qubits with a non-identity operator.")
-                .def("equals", &PauliString<SymEngine::Expression>::equals, "True if the operators are equal, ignoring the coefficients.")
-                .def("set_coeff", &PauliString<SymEngine::Expression>::set_coeff, "Replace the coefficient (in place) by a SymEngine Expression.")
-                .def_static("to_complex", nb::overload_cast<const Expression&>(&PauliString<SymEngine::Expression>::to_complex), "Evaluate a fully numeric Expression to a complex number; raises RuntimeError if it still contains symbols.")
-                .def("copy", &PauliString<SymEngine::Expression>::copy, "An independent copy of the Pauli string.")
-                .def("get_pauli_at_index", &PauliString<SymEngine::Expression>::get_pauli_from_index, "Pauli operator ('I', 'X', 'Y' or 'Z') on the given qubit.")
-                .def("naked", &PauliString<SymEngine::Expression>::naked, "Copy of the Pauli string with coefficient 1.")
-                .def("size", &PauliString<SymEngine::Expression>::size, "Number of qubits with a non-identity operator (the weight).")
-                .def("__len__", &PauliString<SymEngine::Expression>::size, "Number of qubits with a non-identity operator (the weight).")
-                .def("count_y", &PauliString<SymEngine::Expression>::count_y, "Number of Y operators in the Pauli string.")
-                .def("get_hash", [](const PauliString<SymEngine::Expression>& ps) { return hash_limbs_to_int(ps.get_hash()); },
+                .def("diff", &PauliString<Expression>::diff, "Derivative of the coefficient with respect to the named symbol.")
+                .def("subs", &PauliString<Expression>::substitute, "Substitute values for symbols, given as {name: complex value}.")
+                .def("qubits", &PauliString<Expression>::qubits, "Sorted list of the qubits with a non-identity operator.")
+                .def("equals", &PauliString<Expression>::equals, "True if the operators are equal, ignoring the coefficients.")
+                .def("set_coeff", &PauliString<Expression>::set_coeff, "Replace the coefficient (in place) by an Expression.")
+                .def_static("to_complex", nb::overload_cast<const Expression&>(&PauliString<Expression>::to_complex), "Evaluate a fully numeric Expression to a complex number; raises RuntimeError if it still contains symbols.")
+                .def("copy", &PauliString<Expression>::copy, "An independent copy of the Pauli string.")
+                .def("get_pauli_at_index", &PauliString<Expression>::get_pauli_from_index, "Pauli operator ('I', 'X', 'Y' or 'Z') on the given qubit.")
+                .def("naked", &PauliString<Expression>::naked, "Copy of the Pauli string with coefficient 1.")
+                .def("size", &PauliString<Expression>::size, "Number of qubits with a non-identity operator (the weight).")
+                .def("__len__", &PauliString<Expression>::size, "Number of qubits with a non-identity operator (the weight).")
+                .def("count_y", &PauliString<Expression>::count_y, "Number of Y operators in the Pauli string.")
+                .def("get_hash", [](const PauliString<Expression>& ps) { return hash_limbs_to_int(ps.get_hash()); },
                         "Invertible int key of the operator part (coefficient ignored): sum_q p_q * 4**q with I=0, X=1, Y=2, Z=3.")
-                .def_static("from_hash", [](const nb::int_& hash, const SymEngine::Expression& coeff) {
-                                return PauliString<SymEngine::Expression>::from_hash(hash_int_to_limbs(hash), coeff);
+                .def_static("from_hash", [](const nb::int_& hash, const Expression& coeff) {
+                                return PauliString<Expression>::from_hash(hash_int_to_limbs(hash), coeff);
                         }, nb::arg("hash"), nb::arg("coeff"),
                         "Build the Pauli string whose get_hash() equals hash, with the given coefficient.")
                 .def_static("from_hash", [](const nb::int_& hash) {
-                                return PauliString<SymEngine::Expression>::from_hash(hash_int_to_limbs(hash), SymEngine::Expression(1));
+                                return PauliString<Expression>::from_hash(hash_int_to_limbs(hash), Expression(1));
                         }, nb::arg("hash"),
                         "Build the Pauli string whose get_hash() equals hash, with coefficient 1.")
-                .def("key_openfermion", &PauliString<SymEngine::Expression>::key_openfermion, "OpenFermion-style key: list of (Pauli, qubit) pairs of the non-identity sites, sorted by qubit.")
-                .def_prop_ro("x", [](const PauliString<SymEngine::Expression>& ps) { return ps.x.to_vector(); }, "x bits as 64-bit words (bit q set for X or Z on qubit q).")
-                .def_prop_ro("y", [](const PauliString<SymEngine::Expression>& ps) { return ps.y.to_vector(); }, "y bits as 64-bit words (bit q set for Y or Z on qubit q).")
-                .def_ro("coeff", &PauliString<SymEngine::Expression>::coeff, "The coefficient of the Pauli string (read-only).")
-                .def_prop_ro("is_zero", [](const PauliString<SymEngine::Expression>& ps) {
-                                const SymEngine::Expression e = SymEngine::expand(ps.coeff.get_basic());
-                                const auto& b = *e.get_basic();
-                                return SymEngine::is_a_Number(b) && SymEngine::down_cast<const SymEngine::Number&>(b).is_zero();
-                        }, "True if the coefficient is (symbolically) zero.");
+                .def("key_openfermion", &PauliString<Expression>::key_openfermion, "OpenFermion-style key: list of (Pauli, qubit) pairs of the non-identity sites, sorted by qubit.")
+                .def_prop_ro("x", [](const PauliString<Expression>& ps) { return ps.x.to_vector(); }, "x bits as 64-bit words (bit q set for X or Z on qubit q).")
+                .def_prop_ro("y", [](const PauliString<Expression>& ps) { return ps.y.to_vector(); }, "y bits as 64-bit words (bit q set for Y or Z on qubit q).")
+                .def_ro("coeff", &PauliString<Expression>::coeff, "The coefficient of the Pauli string (read-only).")
+                .def_prop_ro("is_zero", [](const PauliString<Expression>& ps) { return ps.coeff.is_zero(); },
+                        "True if the coefficient is (symbolically) zero.");
 
         // QubitHamiltonian for complex coefficients
         auto cls_qhc = nb::class_<QubitHamiltonian<std::complex<double>>>(m, "QubitHamiltonianComplex", "A qubit Hamiltonian: a sum of Pauli strings with complex coefficients. Kept compacted: no two terms share an operator and zero terms are dropped.")
@@ -522,7 +515,7 @@ NB_MODULE(_core, m) {
                 .def(nb::init<const Hamiltonian_structure<std::complex<double>>&>(), "From a list of (coefficient, {qubit: 'X'/'Y'/'Z'}) pairs.")
                 .def("__eq__", &QubitHamiltonian<std::complex<double>>::operator==, "True if both have the same terms with equal coefficients (order-independent).")
                 .def("contains", [](const QubitHamiltonian<std::complex<double>>& qh, const PauliString<std::complex<double>>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
-                .def("contains", [](const QubitHamiltonian<std::complex<double>>& qh, const PauliString<SymEngine::Expression>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
+                .def("contains", [](const QubitHamiltonian<std::complex<double>>& qh, const PauliString<Expression>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
                 .def("contains", [](const QubitHamiltonian<std::complex<double>>& qh, const std::unordered_map<int, std::string>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the Pauli string {qubit: 'X'} in the Hamiltonian (0 if absent).")
                 .def("contains", [](const QubitHamiltonian<std::complex<double>>& qh, const std::vector<std::pair<char, int>>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the Pauli string [('X', 0), ...] in the Hamiltonian (0 if absent).")
                 .def("contains", [](const QubitHamiltonian<std::complex<double>>& qh, const std::string& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the Pauli string 'XIZ' or 'X0 Z2' in the Hamiltonian (0 if absent).")
@@ -579,79 +572,115 @@ NB_MODULE(_core, m) {
                 .def_static("zero", &QubitHamiltonian<std::complex<double>>::zero, "Return an empty Hamiltonian (the zero operator).")
                 .def_static("unit", &QubitHamiltonian<std::complex<double>>::unit, "Return the identity Hamiltonian (single term, coefficient 1, no operators).");
 
-        // QubitHamiltonian for SymEngine::Expression coefficients
-        auto cls_qhs = nb::class_<QubitHamiltonian<SymEngine::Expression>>(m, "QubitHamiltonianSymbolic", "A qubit Hamiltonian: a sum of Pauli strings with symbolic (SymEngine) coefficients. Kept compacted: no two terms share an operator and zero terms are dropped.")
-                .def(nb::init<const std::vector<PauliString<SymEngine::Expression>>&>(), "From a list of Pauli strings (equal operators are merged).")
-                .def(nb::init<const Hamiltonian_structure<SymEngine::Expression>&>(), "From a list of (coefficient, {qubit: 'X'/'Y'/'Z'}) pairs.")
-                .def("__eq__", &QubitHamiltonian<SymEngine::Expression>::operator==, "True if both have the same terms with equal coefficients (order-independent).")
-                .def("contains", [](const QubitHamiltonian<SymEngine::Expression>& qh, const PauliString<SymEngine::Expression>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
-                .def("contains", [](const QubitHamiltonian<SymEngine::Expression>& qh, const PauliString<std::complex<double>>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
-                .def("contains", [](const QubitHamiltonian<SymEngine::Expression>& qh, const std::unordered_map<int, std::string>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the Pauli string {qubit: 'X'} in the Hamiltonian (0 if absent).")
-                .def("contains", [](const QubitHamiltonian<SymEngine::Expression>& qh, const std::vector<std::pair<char, int>>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the Pauli string [('X', 0), ...] in the Hamiltonian (0 if absent).")
-                .def("contains", [](const QubitHamiltonian<SymEngine::Expression>& qh, const std::string& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the Pauli string 'XIZ' or 'X0 Z2' in the Hamiltonian (0 if absent).")
-                .def("__contains__", [](const QubitHamiltonian<SymEngine::Expression>& qh, const PauliString<SymEngine::Expression>& ps) {
+        // QubitHamiltonian for Expression coefficients
+        auto cls_qhs = nb::class_<QubitHamiltonian<Expression>>(m, "QubitHamiltonianSymbolic", "A qubit Hamiltonian: a sum of Pauli strings with symbolic (polynomial) coefficients. Kept compacted: no two terms share an operator and zero terms are dropped.")
+                .def(nb::init<const std::vector<PauliString<Expression>>&>(), "From a list of Pauli strings (equal operators are merged).")
+                .def(nb::init<const Hamiltonian_structure<Expression>&>(), "From a list of (coefficient, {qubit: 'X'/'Y'/'Z'}) pairs.")
+                .def("__eq__", &QubitHamiltonian<Expression>::operator==, "True if both have the same terms with equal coefficients (order-independent).")
+                .def("contains", [](const QubitHamiltonian<Expression>& qh, const PauliString<Expression>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
+                .def("contains", [](const QubitHamiltonian<Expression>& qh, const PauliString<std::complex<double>>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
+                .def("contains", [](const QubitHamiltonian<Expression>& qh, const std::unordered_map<int, std::string>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the Pauli string {qubit: 'X'} in the Hamiltonian (0 if absent).")
+                .def("contains", [](const QubitHamiltonian<Expression>& qh, const std::vector<std::pair<char, int>>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the Pauli string [('X', 0), ...] in the Hamiltonian (0 if absent).")
+                .def("contains", [](const QubitHamiltonian<Expression>& qh, const std::string& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the Pauli string 'XIZ' or 'X0 Z2' in the Hamiltonian (0 if absent).")
+                .def("__contains__", [](const QubitHamiltonian<Expression>& qh, const PauliString<Expression>& ps) {
                                 return coeff_nonzero(qh.contains(ps));
                         }, nb::arg("pauli_string"), "True if a term with this Pauli operator is present (coefficient ignored).")
-                .def("__add__", &QubitHamiltonian<SymEngine::Expression>::operator+, "Adds two Hamiltonians.")
-                .def("__mul__", nb::overload_cast<std::complex<double>>(&QubitHamiltonian<SymEngine::Expression>::operator*, nb::const_), "Scales the Hamiltonian by a complex scalar.")
-                .def("__mul__", nb::overload_cast<double>(&QubitHamiltonian<SymEngine::Expression>::operator*, nb::const_), "Scales the Hamiltonian by a float.")
-                .def("__mul__", nb::overload_cast<int>(&QubitHamiltonian<SymEngine::Expression>::operator*, nb::const_), "Scales the Hamiltonian by an int.")
-                .def("__mul__", nb::overload_cast<const QubitHamiltonian<SymEngine::Expression>&>(&QubitHamiltonian<SymEngine::Expression>::operator*, nb::const_), "Multiplies two Hamiltonians.")
-                .def("__rmul__", [](const QubitHamiltonian<SymEngine::Expression>& qh, std::complex<double> s){ return qh * s; }, "The Hamiltonian scaled by a complex number (scalar on the left).")
-                .def("__rmul__", [](const QubitHamiltonian<SymEngine::Expression>& qh, double s){ return qh * s; }, "The Hamiltonian scaled by a float (scalar on the left).")
-                .def("__rmul__", [](const QubitHamiltonian<SymEngine::Expression>& qh, int s){ return qh * s; }, "The Hamiltonian scaled by an int (scalar on the left).")
+                .def("__add__", &QubitHamiltonian<Expression>::operator+, "Adds two Hamiltonians.")
+                .def("__mul__", nb::overload_cast<std::complex<double>>(&QubitHamiltonian<Expression>::operator*, nb::const_), "Scales the Hamiltonian by a complex scalar.")
+                .def("__mul__", nb::overload_cast<double>(&QubitHamiltonian<Expression>::operator*, nb::const_), "Scales the Hamiltonian by a float.")
+                .def("__mul__", nb::overload_cast<int>(&QubitHamiltonian<Expression>::operator*, nb::const_), "Scales the Hamiltonian by an int.")
+                .def("__mul__", nb::overload_cast<const QubitHamiltonian<Expression>&>(&QubitHamiltonian<Expression>::operator*, nb::const_), "Multiplies two Hamiltonians.")
+                .def("__rmul__", [](const QubitHamiltonian<Expression>& qh, std::complex<double> s){ return qh * s; }, "The Hamiltonian scaled by a complex number (scalar on the left).")
+                .def("__rmul__", [](const QubitHamiltonian<Expression>& qh, double s){ return qh * s; }, "The Hamiltonian scaled by a float (scalar on the left).")
+                .def("__rmul__", [](const QubitHamiltonian<Expression>& qh, int s){ return qh * s; }, "The Hamiltonian scaled by an int (scalar on the left).")
                 .def("trace_out_qubits",
                         nb::overload_cast<const std::vector<int>&, const std::vector<int>&>(
-                                &QubitHamiltonian<SymEngine::Expression>::trace_out_qubits, nb::const_),
+                                &QubitHamiltonian<Expression>::trace_out_qubits, nb::const_),
                         "Trace out qubits projected onto computational-basis states (state[i] in {0, 1}).")
                 .def("trace_out_qubits",
                         nb::overload_cast<const std::vector<int>&, const std::vector<std::pair<std::complex<double>, std::complex<double>>>&>(
-                                &QubitHamiltonian<SymEngine::Expression>::trace_out_qubits, nb::const_),
+                                &QubitHamiltonian<Expression>::trace_out_qubits, nb::const_),
                         "Trace out qubits projected onto arbitrary single-qubit states (a, b) per traced qubit.")
-                .def("to_string", &QubitHamiltonian<SymEngine::Expression>::to_string, "Human-readable form, one term per line.")
-                .def("subs", &QubitHamiltonian<SymEngine::Expression>::substitute, "Substitute values for symbols, given as {name: complex value}.")
-                .def("to_dictionary", &QubitHamiltonian<SymEngine::Expression>::to_dictionary, "Return list of (coefficient, {qubit: Pauli}) pairs.")
-                .def("__str__",&QubitHamiltonian<SymEngine::Expression>::to_string, "Human-readable form, one term per line.")
-                .def("__repr__",&QubitHamiltonian<SymEngine::Expression>::to_string, "Human-readable form, one term per line.")
-                .def("__sub__", nb::overload_cast<const QubitHamiltonian<SymEngine::Expression>&>(&QubitHamiltonian<SymEngine::Expression>::operator-, nb::const_), "Subtracts two Hamiltonians.")
-                .def("__neg__", nb::overload_cast<>(&QubitHamiltonian<SymEngine::Expression>::operator-, nb::const_), "Negates Hamiltonian.")
-                .def("__pow__", &QubitHamiltonian<SymEngine::Expression>::power, "Raise Hamiltonian to integer power.")
-                .def("__len__", &QubitHamiltonian<SymEngine::Expression>::size, "Number of Pauli string terms.")
-                .def("size", &QubitHamiltonian<SymEngine::Expression>::size, "Number of Pauli string terms.")
-                .def("commutator", &QubitHamiltonian<SymEngine::Expression>::commutator, "Commutator [self, other] = self*other - other*self.")
-                .def("targeted_commutator", &QubitHamiltonian<SymEngine::Expression>::targeted_commutator,
+                .def("to_string", &QubitHamiltonian<Expression>::to_string, "Human-readable form, one term per line.")
+                .def("subs", &QubitHamiltonian<Expression>::substitute, "Substitute values for symbols, given as {name: complex value}.")
+                .def("to_dictionary", &QubitHamiltonian<Expression>::to_dictionary, "Return list of (coefficient, {qubit: Pauli}) pairs.")
+                .def("__str__",&QubitHamiltonian<Expression>::to_string, "Human-readable form, one term per line.")
+                .def("__repr__",&QubitHamiltonian<Expression>::to_string, "Human-readable form, one term per line.")
+                .def("__sub__", nb::overload_cast<const QubitHamiltonian<Expression>&>(&QubitHamiltonian<Expression>::operator-, nb::const_), "Subtracts two Hamiltonians.")
+                .def("__neg__", nb::overload_cast<>(&QubitHamiltonian<Expression>::operator-, nb::const_), "Negates Hamiltonian.")
+                .def("__pow__", &QubitHamiltonian<Expression>::power, "Raise Hamiltonian to integer power.")
+                .def("__len__", &QubitHamiltonian<Expression>::size, "Number of Pauli string terms.")
+                .def("size", &QubitHamiltonian<Expression>::size, "Number of Pauli string terms.")
+                .def("commutator", &QubitHamiltonian<Expression>::commutator, "Commutator [self, other] = self*other - other*self.")
+                .def("targeted_commutator", &QubitHamiltonian<Expression>::targeted_commutator,
                         nb::arg("other"), nb::arg("target"),
                         "Coefficient of the target Pauli string in the commutator, via a hash-join, O(min(len(A), len(B))).")
-                .def("diff", &QubitHamiltonian<SymEngine::Expression>::diff, "Derivative of every coefficient with respect to the named symbol.")
-                .def("compact", &QubitHamiltonian<SymEngine::Expression>::compact, "Merge terms with equal operators and drop zero terms, in place; returns the result. Every operation already does this.")
-                .def("set_all_coeff", &QubitHamiltonian<SymEngine::Expression>::set_all_coeff, nb::arg("value"), "Return a copy with every term's coefficient replaced by value.")
-                .def("simplify", &QubitHamiltonian<SymEngine::Expression>::simplify, nb::arg("threshold") = 0.0, "Copy without the terms whose abs(coefficient) <= threshold.")
-                .def("qubits", &QubitHamiltonian<SymEngine::Expression>::qubits, "Sorted list of qubit indices the Hamiltonian acts on non-trivially.")
-                .def("n_qubits", &QubitHamiltonian<SymEngine::Expression>::n_qubits, "Number of qubits the Hamiltonian acts on non-trivially.")
-                .def("is_all_z", &QubitHamiltonian<SymEngine::Expression>::is_all_z, "True if all terms are products of Z operators only.")
-                .def("count_measurements", &QubitHamiltonian<SymEngine::Expression>::count_measurements, "1 if is_all_z(), else the number of terms.")
-                .def("is_hermitian", &QubitHamiltonian<SymEngine::Expression>::is_hermitian, "True if every coefficient is real (abs(imag) <= 1e-12).")
-                .def("is_antihermitian", &QubitHamiltonian<SymEngine::Expression>::is_antihermitian, "True if every coefficient is purely imaginary (abs(real) <= 1e-12).")
-                .def("dagger", &QubitHamiltonian<SymEngine::Expression>::dagger, "Hermitian conjugate: complex-conjugates each coefficient (Pauli strings are Hermitian).")
-                .def("conjugate", &QubitHamiltonian<SymEngine::Expression>::conjugate, "Complex conjugate: conjugates each coefficient and flips its sign for an odd number of Y.")
-                .def("transpose", &QubitHamiltonian<SymEngine::Expression>::transpose, "Transpose: flips the sign of terms with an odd number of Y.")
-                .def("split", &QubitHamiltonian<SymEngine::Expression>::split, "Split into (hermitian, anti-hermitian) parts; needs numeric coefficients.")
-                .def("map_qubits", &QubitHamiltonian<SymEngine::Expression>::map_qubits, "Copy with qubit indices remapped by {old: new} (see PauliString.map_qubits).")
-                .def("power", &QubitHamiltonian<SymEngine::Expression>::power, "Raise Hamiltonian to integer power.")
-                .def("paulistrings", &QubitHamiltonian<SymEngine::Expression>::paulistrings, "Return the list of Pauli string terms.")
-                .def("to_list", &QubitHamiltonian<SymEngine::Expression>::to_list, "The list of Pauli string terms (same as paulistrings()).")
-                .def("to_matrix", &QubitHamiltonian<SymEngine::Expression>::to_matrix, nb::arg("ignore_unused_qubits") = true, "Dense 2**N x 2**N matrix (list of rows). With ignore_unused_qubits, N counts only the qubits the Hamiltonian acts on; otherwise qubit indices are absolute. Needs numeric coefficients.")
-                .def_static("zero", &QubitHamiltonian<SymEngine::Expression>::zero, "Return an empty Hamiltonian (the zero operator).")
-                .def_static("unit", &QubitHamiltonian<SymEngine::Expression>::unit, "Return the identity Hamiltonian (single term, coefficient 1, no operators).");
+                .def("diff", &QubitHamiltonian<Expression>::diff, "Derivative of every coefficient with respect to the named symbol.")
+                .def("compact", &QubitHamiltonian<Expression>::compact, "Merge terms with equal operators and drop zero terms, in place; returns the result. Every operation already does this.")
+                .def("set_all_coeff", &QubitHamiltonian<Expression>::set_all_coeff, nb::arg("value"), "Return a copy with every term's coefficient replaced by value.")
+                .def("simplify", &QubitHamiltonian<Expression>::simplify, nb::arg("threshold") = 0.0, "Copy without the terms whose abs(coefficient) <= threshold.")
+                .def("qubits", &QubitHamiltonian<Expression>::qubits, "Sorted list of qubit indices the Hamiltonian acts on non-trivially.")
+                .def("n_qubits", &QubitHamiltonian<Expression>::n_qubits, "Number of qubits the Hamiltonian acts on non-trivially.")
+                .def("is_all_z", &QubitHamiltonian<Expression>::is_all_z, "True if all terms are products of Z operators only.")
+                .def("count_measurements", &QubitHamiltonian<Expression>::count_measurements, "1 if is_all_z(), else the number of terms.")
+                .def("is_hermitian", &QubitHamiltonian<Expression>::is_hermitian, "True if every coefficient is real (abs(imag) <= 1e-12).")
+                .def("is_antihermitian", &QubitHamiltonian<Expression>::is_antihermitian, "True if every coefficient is purely imaginary (abs(real) <= 1e-12).")
+                .def("dagger", &QubitHamiltonian<Expression>::dagger, "Hermitian conjugate: complex-conjugates each coefficient (Pauli strings are Hermitian).")
+                .def("conjugate", &QubitHamiltonian<Expression>::conjugate, "Complex conjugate: conjugates each coefficient and flips its sign for an odd number of Y.")
+                .def("transpose", &QubitHamiltonian<Expression>::transpose, "Transpose: flips the sign of terms with an odd number of Y.")
+                .def("split", &QubitHamiltonian<Expression>::split, "Split into (hermitian, anti-hermitian) parts; needs numeric coefficients.")
+                .def("map_qubits", &QubitHamiltonian<Expression>::map_qubits, "Copy with qubit indices remapped by {old: new} (see PauliString.map_qubits).")
+                .def("power", &QubitHamiltonian<Expression>::power, "Raise Hamiltonian to integer power.")
+                .def("paulistrings", &QubitHamiltonian<Expression>::paulistrings, "Return the list of Pauli string terms.")
+                .def("to_list", &QubitHamiltonian<Expression>::to_list, "The list of Pauli string terms (same as paulistrings()).")
+                .def("to_matrix", &QubitHamiltonian<Expression>::to_matrix, nb::arg("ignore_unused_qubits") = true, "Dense 2**N x 2**N matrix (list of rows). With ignore_unused_qubits, N counts only the qubits the Hamiltonian acts on; otherwise qubit indices are absolute. Needs numeric coefficients.")
+                .def_static("zero", &QubitHamiltonian<Expression>::zero, "Return an empty Hamiltonian (the zero operator).")
+                .def_static("unit", &QubitHamiltonian<Expression>::unit, "Return the identity Hamiltonian (single term, coefficient 1, no operators).");
 
-        nb::class_<SymEngine::Expression>(m, "Expression", "A SymEngine expression, used as symbolic coefficient.")
-                .def(nb::init<const std::string&>(), "Parse an expression such as 'a*b + 2'.")
-                .def("__str__", [](const SymEngine::Expression &e) {
-                        return SymEngine::str(*e.get_basic());
-                }, "The expression as a string.")
-                .def("__repr__", [](const SymEngine::Expression &e) {
-                        return SymEngine::str(*e.get_basic());
-                }, "The expression as a string.");
+        using cplx = std::complex<double>;
+        nb::class_<Expression>(m, "Expression",
+                "A symbolic coefficient: a polynomial in named symbols with complex coefficients, kept in "
+                "canonical form (so equal polynomials compare equal and a - a is 0). Symbols are real unless "
+                "declared complex with set_symbol_complex().")
+                .def(nb::init<const std::string&>(), nb::arg("text"),
+                        "Parse a polynomial such as 'a*b + 2', '2a - b**2/4' or '(1 + 2*I)*c'. I is the imaginary "
+                        "unit; pi and E are numbers. Division is only allowed by numbers. Raises ValueError.")
+                .def(nb::init<cplx>(), nb::arg("value"), "A numeric expression.")
+                .def("__str__", &Expression::str, "The expression as a string, which Expression(...) parses back exactly.")
+                .def("__repr__", &Expression::str, "The expression as a string, which Expression(...) parses back exactly.")
+                .def("__eq__", [](const Expression& a, const Expression& b) { return a == b; }, "Equal polynomials.")
+                .def("__eq__", [](const Expression& a, cplx b) { return a == Expression(b); }, "Equal to the number.")
+                .def("__hash__", [](const Expression& e) { return static_cast<Py_ssize_t>(e.hash()); })
+                .def("__add__", [](const Expression& a, const Expression& b) { return a + b; })
+                .def("__add__", [](const Expression& a, cplx b) { return a + b; })
+                .def("__radd__", [](const Expression& a, cplx b) { return b + a; })
+                .def("__sub__", [](const Expression& a, const Expression& b) { return a - b; })
+                .def("__sub__", [](const Expression& a, cplx b) { return a - b; })
+                .def("__rsub__", [](const Expression& a, cplx b) { return b - a; })
+                .def("__mul__", [](const Expression& a, const Expression& b) { return a * b; })
+                .def("__mul__", [](const Expression& a, cplx b) { return a * b; })
+                .def("__rmul__", [](const Expression& a, cplx b) { return b * a; })
+                .def("__neg__", [](const Expression& a) { return -a; })
+                .def("__pow__", [](const Expression& a, unsigned n) { return a.pow(n); }, "Non-negative integer power.")
+                .def("__complex__", &Expression::to_complex, "The value; raises RuntimeError if symbols are left.")
+                .def("to_complex", &Expression::to_complex, "The value; raises RuntimeError if symbols are left.")
+                .def("diff", nb::overload_cast<const std::string&>(&Expression::diff, nb::const_), nb::arg("symbol"),
+                        "Derivative with respect to the named symbol.")
+                .def("subs", [](const Expression& e, const std::unordered_map<std::string, cplx>& values) { return e.subs(values); },
+                        nb::arg("values"), "Substitute numbers for symbols, given as {name: value}.")
+                .def("conjugate", [](const Expression& e) { return e.conjugate(); },
+                        "Complex conjugate; real symbols stay, complex ones are conjugated.")
+                .def_prop_ro("is_zero", &Expression::is_zero, "True for the zero polynomial.")
+                .def_prop_ro("is_number", &Expression::is_number, "True if no symbols are left.")
+                .def("free_symbols", &Expression::free_symbols, "Names of the symbols that occur, sorted.")
+                .def("n_terms", &Expression::n_terms, "Number of monomials.");
+
+        m.def("set_symbol_complex", &pauliengine::symbolic::set_symbol_complex, nb::arg("name"), nb::arg("is_complex") = true,
+                "Declare a symbol complex (or real again). Symbols are real by default, so conjugate() and dagger() leave "
+                "them unchanged. A complex symbol a is conjugated to the symbol 'conjugate(a)'; subs({'a': v}) also puts "
+                "conj(v) for it, and diff treats a and conjugate(a) as independent (Wirtinger derivatives).");
+        m.def("is_symbol_complex", &pauliengine::symbolic::is_symbol_complex, nb::arg("name"),
+                "True if the symbol was declared complex.");
 
         // Pauli string without a coefficient
         auto cls_up = nb::class_<unweighted_pauliString>(m, "unweighted_pauliString",
@@ -694,9 +723,9 @@ NB_MODULE(_core, m) {
                 .def("naked", &unweighted_pauliString::naked, "Copy of the string with phase 0.")
                 .def("to_pauli_string", [](const unweighted_pauliString& s, std::complex<double> coeff) { return s.to_pauli_string(coeff); },
                         nb::arg("coeff") = std::complex<double>(1.0, 0.0), "The Pauli string with coefficient coeff * i**phase.")
-                .def("to_pauli_string", [](const unweighted_pauliString& s, const std::string& coeff) { return s.to_pauli_string(SymEngine::Expression(coeff)); },
+                .def("to_pauli_string", [](const unweighted_pauliString& s, const std::string& coeff) { return s.to_pauli_string(Expression(coeff)); },
                         nb::arg("coeff"), "The symbolic Pauli string with coefficient coeff * i**phase; coeff is parsed like 'a*b'.")
-                .def("to_pauli_string", [](const unweighted_pauliString& s, const SymEngine::Expression& coeff) { return s.to_pauli_string(coeff); },
+                .def("to_pauli_string", [](const unweighted_pauliString& s, const Expression& coeff) { return s.to_pauli_string(coeff); },
                         nb::arg("coeff"), "The symbolic Pauli string with coefficient coeff * i**phase.")
                 .def("to_dictionary", &unweighted_pauliString::to_dictionary, "The string as a (phase factor, {qubit: 'X'/'Y'/'Z'}) pair.")
                 .def("qubits", &unweighted_pauliString::qubits, "Sorted list of the qubits with a non-identity operator.")
@@ -754,7 +783,7 @@ NB_MODULE(_core, m) {
                 .def("__eq__", &unweighted_QubitHamiltonian::operator==, "Equal sets with equal phases, whatever the order of the elements is.")
                 .def("to_qubit_hamiltonian", [](const unweighted_QubitHamiltonian& h, std::complex<double> coeff) { return h.to_qubit_hamiltonian(coeff); },
                         nb::arg("coeff") = std::complex<double>(1.0, 0.0), "The ordinary Hamiltonian with coefficient coeff * i**k on every element.")
-                .def("to_qubit_hamiltonian", [](const unweighted_QubitHamiltonian& h, const std::string& coeff) { return h.to_qubit_hamiltonian(SymEngine::Expression(coeff)); },
+                .def("to_qubit_hamiltonian", [](const unweighted_QubitHamiltonian& h, const std::string& coeff) { return h.to_qubit_hamiltonian(Expression(coeff)); },
                         nb::arg("coeff"), "The symbolic Hamiltonian with coefficient coeff * i**k on every element; coeff is parsed like 'a*b'.");
 
         // PauliCycle and PauliCycleSum, with complex or symbolic coefficients
@@ -762,13 +791,13 @@ NB_MODULE(_core, m) {
                 "A Pauli string with a complex coefficient together with all of its cyclic rotations on "
                 "n_qubits qubits, C(P) = coeff * sum_k R^k P. The sum runs over all n rotations, so a base with a "
                 "shorter period counts each distinct rotation several times.");
-        auto cls_cys_sym = bind_cycle<SymEngine::Expression>(m, "PauliCycleSymbolic",
-                "A Pauli string with a symbolic (SymEngine) coefficient together with all of its cyclic rotations "
+        auto cls_cys_sym = bind_cycle<Expression>(m, "PauliCycleSymbolic",
+                "A Pauli string with a symbolic (polynomial) coefficient together with all of its cyclic rotations "
                 "on n_qubits qubits, C(P) = coeff * sum_k R^k P.");
         auto cls_cys = bind_cycle_sum<std::complex<double>>(m, "PauliCycleSumComplex",
                 "A sum of PauliCycles with complex coefficients; each cycle carries its own coefficient. "
                 "Summands from the same rotation orbit are always merged.");
-        auto cls_css = bind_cycle_sum<SymEngine::Expression>(m, "PauliCycleSumSymbolic",
+        auto cls_css = bind_cycle_sum<Expression>(m, "PauliCycleSumSymbolic",
                 "A sum of PauliCycles with symbolic coefficients; each cycle carries its own coefficient. "
                 "Summands from the same rotation orbit are always merged.");
 
@@ -826,7 +855,7 @@ NB_MODULE(_core, m) {
         auto cls_ors = bind_orbit_sum<std::complex<double>>(m, "PauliOrbitSumComplex",
                 "A weighted sum of Pauli orbits with complex coefficients, sum_i coeffs[i] * data[i], on a fixed "
                 "number of qubits.");
-        auto cls_oss = bind_orbit_sum<SymEngine::Expression>(m, "PauliOrbitSumSymbolic",
+        auto cls_oss = bind_orbit_sum<Expression>(m, "PauliOrbitSumSymbolic",
                 "A weighted sum of Pauli orbits with symbolic coefficients, sum_i coeffs[i] * data[i], on a fixed "
                 "number of qubits.");
 

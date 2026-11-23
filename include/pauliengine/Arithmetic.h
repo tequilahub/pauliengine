@@ -79,7 +79,7 @@ QubitHamiltonian<C> as_hamiltonian(const PauliOrbitSum<C>& s) {
 namespace pauliengine_detail {
 
 using Complex = std::complex<double>;
-using Symbolic = SymEngine::Expression;
+using Symbolic = pauliengine::symbolic::Expression;
 
 template <typename C>
 C coeff_of(const QubitHamiltonian<C>&);
@@ -335,7 +335,7 @@ auto commutator(const A& a, const B& b) {
 namespace pauliengine_detail {
 
 inline Complex conj_coeff(const Complex& c) { return std::conj(c); }
-inline Symbolic conj_coeff(const Symbolic& c) { return Symbolic(SymEngine::conjugate(c.get_basic())); }
+inline Symbolic conj_coeff(const Symbolic& c) { return c.conjugate(); }
 
 /// Hash of a Pauli string's operator part, independent of the coefficient type.
 struct OperatorKeyHash {

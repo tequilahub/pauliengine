@@ -2,14 +2,12 @@
 
 /// @file
 /// Small helpers that let the cycle and orbit classes work with both coefficient
-/// types, std::complex<double> and SymEngine::Expression.
+/// types, std::complex<double> and the polynomial Expression.
 
 #include <complex>
 #include <type_traits>
 
-#include <symengine/basic.h>
-#include <symengine/expression.h>
-#include <symengine/number.h>
+#include "pauliengine/Polynomial.h"
 
 namespace pauliengine_detail {
 
@@ -33,17 +31,9 @@ C coeff_zero() {
         }
 }
 
-/// Whether c is zero. A symbolic coefficient is expanded first, since SymEngine
-/// does not reduce for example (2 + a) - (2 + a) to 0 on its own.
+/// Whether c is zero. Polynomials are canonical, so this needs no expansion.
 inline bool coeff_is_zero(const std::complex<double>& c) { return c == std::complex<double>(0.0, 0.0); }
-inline bool coeff_is_zero(const SymEngine::Expression& c) {
-        const auto& direct = *c.get_basic();
-        if (SymEngine::is_a_Number(direct)) {
-                return SymEngine::down_cast<const SymEngine::Number&>(direct).is_zero();
-        }
-        const SymEngine::RCP<const SymEngine::Basic> expanded = SymEngine::expand(c.get_basic());
-        return SymEngine::is_a_Number(*expanded) && SymEngine::down_cast<const SymEngine::Number&>(*expanded).is_zero();
-}
+inline bool coeff_is_zero(const pauliengine::symbolic::Expression& c) { return c.is_zero(); }
 
 /// A coefficient converted to type To (complex to symbolic, or unchanged).
 template <typename To, typename From>

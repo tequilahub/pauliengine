@@ -19,11 +19,8 @@ if TYPE_CHECKING:
 
 
 def _complex_coeff_to_expression(coeff: complex) -> Expression:
-    """Convert a complex<double> coefficient to a SymEngine Expression."""
-    real, imag = coeff.real, coeff.imag
-    if imag == 0.0:
-        return Expression(repr(real))
-    return Expression(f"{real!r} + {imag!r}*I")
+    """Convert a complex<double> coefficient to a numeric Expression."""
+    return Expression(complex(coeff))
 
 
 def _to_symbolic_ps(term) -> PauliStringSymbolic:

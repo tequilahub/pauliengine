@@ -11,7 +11,31 @@ Symmetry-adapted operator bases from arXiv:2604.16701 (Pauli cycles and Pauli
 orbits), arithmetic and inner products between all representations, and the
 Pauli decomposition of matrices.
 
+### Removed
+
+- **SymEngine, GMP and Conan are no longer needed.** Symbolic coefficients are now
+  PauliEngine's own header-only polynomials (`include/pauliengine/Polynomial.h`,
+  `pauliengine::symbolic::Expression`): sums of monomials in named symbols with
+  `complex<double>` coefficients, always in canonical form. A source build only needs
+  a C++20 compiler and CMake; `conanfile.txt`, `conan_profile` and the Conan steps in CI
+  and the devcontainer are gone.
+
 ### Added
+
+- **Own polynomial coefficients** (replacing SymEngine): `pe.Expression` parses texts
+  such as `"2*a*b + 3"`, `"a**2 - b/4"`, `"2a"` or `"(1 + 2*I)*c"` and supports `+`, `-`,
+  `*`, `**`, `==`, `diff`, `subs`, `conjugate`, `free_symbols`, `is_zero`, `is_number`
+  and `complex(...)`. `str()` is read back exactly by the parser. Expressions share no
+  state, so symbolic products, commutators, compaction, `diff`, `subs` and `dagger` now
+  run in parallel with OpenMP like the complex ones.
+  Products and commutators of symbolic Hamiltonians work on flat records (operator,
+  monomial packed into 64 bits) -> complex number and share the parallel sort and merge
+  of the complex path; they fall back to term-by-term polynomial arithmetic if the
+  monomials of a product need more than 64 bits. Monomials are ordered
+  lexicographically with the newest symbol most significant, constant term first.
+- **Complex symbols**: `pe.set_symbol_complex("z")` / `pe.is_symbol_complex("z")`. A
+  complex symbol is conjugated to the symbol `conjugate(z)`; `subs({"z": v})` also puts
+  `conj(v)` for it, and `diff` treats both as independent (Wirtinger derivatives).
 
 - **Symbolic coefficients for Pauli cycles and orbit sums**: `PauliCycleSymbolic`,
   `PauliCycleSumSymbolic` and `PauliOrbitSumSymbolic` next to the complex classes
@@ -104,6 +128,14 @@ Pauli decomposition of matrices.
   (`tools/commutator_precision_smoke.py`).
 
 ### Changed
+
+- **Symbolic coefficients are polynomials only.** Division by symbols, non-integer or
+  negative powers of symbols and functions such as `sin` raise `ValueError` when parsed.
+- **Symbols are real by default**: `dagger()`, `conjugate()` and conjugate-linear inner
+  products leave a symbol unchanged unless it was declared complex. SymEngine kept an
+  unevaluated `conjugate(a)` for every symbol.
+- Symbolic zero tests and comparisons need no expansion any more: polynomials are
+  canonical, so equal coefficients are equal term by term.
 
 - `pe.PauliString()`, `pe.PauliString("a")` and other calls without a coefficient no longer
   give a zero string or a symbolic multiple of the identity, see the Pauli strings above.

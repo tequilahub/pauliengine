@@ -3,7 +3,8 @@ C++ API
 
 The library is header-only under ``include/pauliengine/``. ``PauliString`` and
 ``QubitHamiltonian`` are templates over the coefficient type
-(``std::complex<double>`` or ``SymEngine::Expression``); the cycle and orbit
+(``std::complex<double>`` or the polynomial ``pauliengine::symbolic::Expression``
+from ``Polynomial.h``); the cycle and orbit
 classes use ``std::complex<double>``. Operations exposed in Python are
 available in C++ under the same name, with these exceptions:
 

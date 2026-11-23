@@ -17,11 +17,5 @@ register_libstdcxx_printers (None)
 end
 EOT
 
-# install conan
+# Python environment for building and testing (no C++ dependencies to install)
 uv venv
-source /home/vscode/.venv/bin/activate
-uv pip install conan 
-
-# setup conan profile and install dependencies
-conan profile detect --force 
-conan install .  --output-folder=build --build=missing -pr ./conan_profile

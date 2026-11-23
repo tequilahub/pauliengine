@@ -2,7 +2,7 @@
 
 A C++ core with a nanobind Python frontend for working with Pauli strings and
 qubit Hamiltonians. Coefficients can be numeric (`std::complex<double>`) or
-fully symbolic (SymEngine).
+symbolic (polynomials in named parameters). There are no C++ dependencies.
 
 See [arXiv:2601.02233](https://arxiv.org/abs/2601.02233) for the algorithmic
 background.
@@ -17,7 +17,8 @@ background.
 - **Binary symplectic representation** — multiplication, commutators, and
   hashing are O(n / 64) over the qubit count.
 - **Two coefficient backends** — numeric (`complex<double>`) and symbolic
-  (`SymEngine::Expression`); cross-type arithmetic is handled automatically and
+  (`pauliengine::symbolic::Expression`, polynomials with complex coefficients,
+  thread-safe and parallelized like the numeric path); cross-type arithmetic is handled automatically and
   type-promotes the way you expect (any symbolic term → the whole Hamiltonian
   becomes symbolic).
 - **Compaction invariant** — every operation that returns a `QubitHamiltonian`
@@ -41,7 +42,7 @@ import pauliengine as pe
 # A single Pauli string: dict-of-operators style.
 p1 = pe.PauliString(1.0, {0: "Z", 1: "X"})
 
-# Symbolic coefficient — anything coercible to a SymEngine Expression.
+# Symbolic coefficient — a polynomial such as "a", "2*a*b" or "a**2 - b/4".
 p2 = pe.PauliString("a", {1: "X"})
 
 # OpenFermion-style: PauliString((coeff, [(Pauli, qubit), ...]))
@@ -160,9 +161,13 @@ M_full = np.array(H.to_matrix(ignore_unused_qubits=False))  # absolute qubit ind
 
 ## Symbolic coefficients
 
-Any string coefficient (or `SymEngine::Expression` from C++) makes the term
-symbolic. Symbolic PauliStrings and Hamiltonians support every arithmetic
-operation plus:
+Any string coefficient (or `pauliengine::symbolic::Expression` from C++) makes
+the term symbolic. Coefficients are polynomials in named symbols with complex
+coefficients, such as `"2*a*b + 3"`, `"a**2 - b/4"` or `"(1 + 2*I)*c"`; `I` is
+the imaginary unit. Division is only possible by numbers, and functions such as
+`sin` are not supported. Polynomials are kept in canonical form, so `"a - a"` is
+zero and equal polynomials compare equal. Symbolic PauliStrings and Hamiltonians
+support every arithmetic operation plus:
 
 ```python
 H = pe.QubitHamiltonian([("a", {0: "X"}), ("b", {1: "Z"})])
@@ -174,6 +179,21 @@ H2 = H.subs({"a": 2.0})     # substitute and evaluate
 `diff` is also available on `PauliString`. Mixing symbolic and numeric inputs
 is fine: the factory scans every element and uses the symbolic builder if
 needed.
+
+Symbols are **real** by default, so `dagger()` and `conjugate()` only conjugate
+the numeric factors. Declare a symbol complex if it will hold complex values:
+
+```python
+pe.set_symbol_complex("z")
+H = pe.QubitHamiltonian([("z", {0: "X"})])
+H.dagger()                   # conjugate(z) : X(0)
+H.dagger().subs({"z": 1+2j}) # (1 - 2*I) : X(0); conjugate(z) gets conj(value)
+```
+
+A complex symbol `z` and `conjugate(z)` are independent variables for `diff`
+(Wirtinger derivatives). `pe.Expression` exposes the coefficients directly
+(`+`, `-`, `*`, `**`, `diff`, `subs`, `conjugate`, `free_symbols`,
+`complex(...)` for numeric ones).
 
 ---
 
@@ -236,7 +256,8 @@ message if it is missing.
 
 The library is a header-only template under `include/pauliengine/`. Both
 `PauliString<Coeff>` and `QubitHamiltonian<Coeff>` work for
-`Coeff = std::complex<double>` and `Coeff = SymEngine::Expression`. Every
+`Coeff = std::complex<double>` and `Coeff = pauliengine::symbolic::Expression`
+(header `Polynomial.h`). Every
 operation exposed in Python is available in C++ with the same name. A
 `QubitHamiltonian` with complex coefficients stores its terms as flat arrays;
 `terms()` returns them as Pauli strings, `term(i)` a single one.
@@ -260,43 +281,16 @@ distribution requires the build dependencies below.
 - A C++20 compiler (MSVC 19.3+, GCC 11+, or Clang 14+)
 - CMake 3.20+
 - Python 3.10–3.13
-- [Conan 2](https://conan.io) (to pull in SymEngine)
 - [nanobind](https://github.com/wjakob/nanobind) (build-time)
 
 ### Install from source
 
 ```bash
-pip install conan
-conan profile detect
-conan install . --output-folder=build --build=missing
 pip install .
 ```
 
-The CMake build picks up the Conan toolchain from `build/conan_toolchain.cmake`.
-For an editable / development install use `pip install -e .` instead of
-`pip install .`.
-
-### Windows notes
-
-If you are on Windows and have not built SymEngine before, the Conan step will
-build it from source on first install — that takes a few minutes. Subsequent
-builds use the cached artifact.
-
-> **Performance note.** PauliEngine can be built without SymEngine, but
-> symbolic coefficients are unavailable in that mode and the runtime cost of
-> certain numeric paths increases.
-
-### macOS prerequisite
-
-Conan does not currently ship a prebuilt SymEngine binary for macOS. Build it
-from source once before the main install step:
-
-```bash
-conan install --build=symengine/0.14.0
-```
-
-Subsequent installs pick up the cached artifact, so this only needs to be done
-the first time.
+There are no C++ libraries to install beforehand. For an editable /
+development install use `pip install -e .` instead of `pip install .`.
 
 ---
 

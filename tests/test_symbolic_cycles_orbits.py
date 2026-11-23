@@ -126,8 +126,23 @@ class TestCycleAlgebra:
         # symbolic on the right: no conjugate, so the value can be compared
         assert value(pe.inner_product(xc + yc, x + y)) == pytest.approx(pe.inner_product(xc + yc, xc + yc))
         assert value(pe.inner_product(xc, x)) == pytest.approx(pe.inner_product(xc, xc))
-        # symbolic on the left: conjugate-linear
-        assert "conjugate(b)" in str(pe.inner_product(x + y, y))
+        # symbolic on the left: conjugate-linear; a and b are real, so conjugation keeps them
+        left = pe.inner_product(x + y, y)
+        assert "conjugate" not in str(left)
+        assert value(left) == pytest.approx(pe.inner_product(xc + yc, yc))
+
+    def test_inner_product_complex_symbol(self):
+        # a symbol declared complex is conjugated on the left
+        pe.set_symbol_complex("cyc_z")
+        try:
+            z = pe.PauliCycle(N, "XZI", "cyc_z")
+            assert "conjugate(cyc_z)" in str(pe.inner_product(z, z))
+            zc = pe.PauliCycle(N, "XZI", 0.5 + 2j)
+            got = pe.QubitHamiltonian([pe.PauliString(str(pe.inner_product(z, zc)), {})]).subs({"cyc_z": 0.5 + 2j})
+            want = pe.inner_product(zc, zc)
+            assert _core.PauliStringSymbolic.to_complex(got.to_dictionary()[0][0]) == pytest.approx(want)
+        finally:
+            pe.set_symbol_complex("cyc_z", False)
 
 
 @pytest.fixture
@@ -177,7 +192,10 @@ class TestOrbitSum:
         assert value(pe.inner_product(num, sym)) == pytest.approx(pe.inner_product(num, num))
         h = num.to_qubit_hamiltonian()
         assert value(pe.inner_product(h, sym)) == pytest.approx(pe.inner_product(h, num))
-        assert "conjugate(2.0 + a)" in str(pe.inner_product(sym, h))
+        # a is real, so the conjugate-linear left side keeps it
+        left = pe.inner_product(sym, h)
+        assert "conjugate" not in str(left)
+        assert value(left) == pytest.approx(pe.inner_product(num, h))
 
     def test_with_cycles(self, orbit_sums, cycles):
         sym, num = orbit_sums
