@@ -13,6 +13,16 @@ Pauli decomposition of matrices.
 
 ### Added
 
+- Pauli cycles, orbits and their sums take complex scalars (`c * 2j`, `1j * orbit`) and
+  unary minus, like Pauli strings and Hamiltonians.
+- Division by a number (`x / 2`, `x / 2j`) for every operator, and multiplication by a
+  symbolic `Expression` on either side, which gives the symbolic class of the same kind
+  (C++: `scaled_by(a, e)`). Unweighted strings and sets become weighted as with a numeric
+  scale. Dividing by zero raises `ZeroDivisionError`.
+- `inner_product` between two unweighted strings or sets, and `-unweighted_QubitHamiltonian`
+  (every element times -1, still a set).
+- **`QubitHamiltonian.targeted_commutator` with a Pauli string**: `h.targeted_commutator(x, target)`
+  also takes a single Pauli string `x` (of the same coefficient type) as the other operand.
 - **Symbolic coefficients for Pauli cycles and orbit sums**: `PauliCycleSymbolic`,
   `PauliCycleSumSymbolic` and `PauliOrbitSumSymbolic` next to the complex classes
   (`PauliCycleComplex`, `PauliCycleSumComplex`, `PauliOrbitSumComplex`).
@@ -103,6 +113,15 @@ Pauli decomposition of matrices.
 
 ### Changed
 
+- The commutator of a complex and a symbolic Pauli string is a symbolic `PauliString`, like
+  their product, instead of a `QubitHamiltonianSymbolic`.
+- `==` never raises: complex and symbolic Pauli strings and Hamiltonians compare by value,
+  `PauliString ==` returns a `bool` instead of an `int`, and any other type compares unequal.
+  `PauliCycleSum` and `PauliOrbitSum` compare by value instead of by identity and are no
+  longer hashable.
+- `numpy_scalar * unweighted_QubitHamiltonian` gives a `QubitHamiltonian` instead of a numpy array.
+- `PauliOrbit.targeted_commutator` checks the Y column of the overlap table before its
+  innermost loop, so heavy targets cost O(n^6) instead of O(n^7).
 - `pe.PauliString()`, `pe.PauliString("a")` and other calls without a coefficient no longer
   give a zero string or a symbolic multiple of the identity, see the Pauli strings above.
   Use `pe.PauliString("a", {})` for the latter.

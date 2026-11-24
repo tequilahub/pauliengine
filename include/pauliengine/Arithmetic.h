@@ -303,8 +303,9 @@ auto operator*(const A& a, const B& b) {
 /// Commutator [a, b] = a b - b a for any two operators.
 ///
 /// Same type with a commutator member: that member (PauliString stays a
-/// PauliString, cycles and orbits stay sums). Same family: the family's sum
-/// commutator. Otherwise both sides are expanded and the result is a
+/// PauliString, cycles and orbits stay sums). Two Pauli strings of different
+/// coefficient types: a symbolic PauliString, like their product. Same family:
+/// the family's sum commutator. Otherwise both sides are expanded and the result is a
 /// QubitHamiltonian.
 template <typename A, typename B>
         requires(OperatorLike<A> && OperatorLike<B>)
@@ -313,6 +314,9 @@ auto commutator(const A& a, const B& b) {
         using R = promoted_coeff_t<A, B>;
         if constexpr (std::is_same_v<A, B> && requires { a.commutator(b); }) {
                 return a.commutator(b);
+        } else if constexpr (is_pauli_string<A> && is_pauli_string<B>) {
+                // complex and symbolic: a single string, like their product
+                return PauliString<R>(a.x, a.y, R(a.coeff)).commutator(PauliString<R>(b.x, b.y, R(b.coeff)));
         } else if constexpr (cycle_pair<A, B>) {
                 return as_cycle_sum<R>(a).commutator(as_cycle_sum<R>(b));
         } else if constexpr (orbit_pair<A, B>) {
@@ -592,4 +596,69 @@ inline unweighted_QubitHamiltonian commutator(const unweighted_QubitHamiltonian&
 }
 inline unweighted_QubitHamiltonian commutator(const unweighted_pauliString& s, const unweighted_QubitHamiltonian& h) {
         return as_unweighted_set(s).commutator(h);
+}
+
+/// <a, b> for two unweighted operators, each counted with coefficient 1.0 * i^phase.
+template <typename A, typename B>
+        requires(Unweighted<A> && Unweighted<B>)
+std::complex<double> inner_product(const A& a, const B& b) { return inner_product(as_weighted(a), as_weighted(b)); }
+
+// ---------------------------------------------------------------------------
+// Scaling by a symbolic coefficient
+// ---------------------------------------------------------------------------
+//
+// scaled_by(a, e) is a * e for a symbolic e: every coefficient multiplied by e, in
+// the symbolic class of a's own kind. An orbit becomes an orbit sum, an unweighted
+// string or set its weighted form (coefficient e * i^phase). Terms of a sum whose
+// coefficient becomes zero are dropped.
+
+template <typename C>
+PauliString<SymEngine::Expression> scaled_by(const PauliString<C>& a, const SymEngine::Expression& e) {
+        return PauliString<SymEngine::Expression>(a.x, a.y, SymEngine::Expression(a.coeff) * e);
+}
+
+template <typename C>
+QubitHamiltonian<SymEngine::Expression> scaled_by(const QubitHamiltonian<C>& h, const SymEngine::Expression& e) {
+        std::vector<PauliString<SymEngine::Expression>> terms;
+        terms.reserve(h.size());
+        for (const auto& ps : h.terms()) terms.push_back(scaled_by(ps, e));
+        return QubitHamiltonian<SymEngine::Expression>(std::move(terms));
+}
+
+template <typename C>
+PauliCycle<SymEngine::Expression> scaled_by(const PauliCycle<C>& c, const SymEngine::Expression& e) {
+        PauliCycle<SymEngine::Expression> out = pauliengine_detail::convert_cycle<SymEngine::Expression>(c);
+        out.Base.coeff = out.Base.coeff * e;
+        return out;
+}
+
+template <typename C>
+PauliCycleSum<SymEngine::Expression> scaled_by(const PauliCycleSum<C>& s, const SymEngine::Expression& e) {
+        std::vector<PauliCycle<SymEngine::Expression>> terms;
+        terms.reserve(s.data.size());
+        for (const auto& c : s.data) terms.push_back(scaled_by(c, e));
+        return PauliCycleSum<SymEngine::Expression>(std::move(terms));
+}
+
+inline PauliOrbitSum<SymEngine::Expression> scaled_by(const PauliOrbit& o, const SymEngine::Expression& e) {
+        PauliOrbitSum<SymEngine::Expression> out(o.n_qubits);
+        out.add(o, e);
+        out.prune_zeros();
+        return out;
+}
+
+template <typename C>
+PauliOrbitSum<SymEngine::Expression> scaled_by(const PauliOrbitSum<C>& s, const SymEngine::Expression& e) {
+        PauliOrbitSum<SymEngine::Expression> out(s.n_qubits);
+        for (size_t k = 0; k < s.data.size(); ++k) out.add(s.data[k], SymEngine::Expression(s.coeffs[k]) * e);
+        out.prune_zeros();
+        return out;
+}
+
+inline PauliString<SymEngine::Expression> scaled_by(const unweighted_pauliString& s, const SymEngine::Expression& e) {
+        return s.to_pauli_string(e);
+}
+
+inline QubitHamiltonian<SymEngine::Expression> scaled_by(const unweighted_QubitHamiltonian& h, const SymEngine::Expression& e) {
+        return h.to_qubit_hamiltonian(e);
 }

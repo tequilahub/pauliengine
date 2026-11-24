@@ -75,13 +75,61 @@ static bool coeff_nonzero(const SymEngine::Expression& c) {
         return !(SymEngine::is_a_Number(b) && SymEngine::down_cast<const SymEngine::Number&>(b).is_zero());
 }
 
-// Register a * s and s * a of class A for an int or float s.
+// Register a * s and s * a of class A for an int, float or complex s, and -a.
 template <typename A, typename Cls>
 void bind_scale_ops(Cls& cls, const char* doc) {
         cls.def("__mul__", [](const A& a, int s) { return a * s; }, nb::arg("scale"), doc)
                 .def("__mul__", [](const A& a, double s) { return a * s; }, nb::arg("scale"), doc)
+                .def("__mul__", [](const A& a, std::complex<double> s) { return a * s; }, nb::arg("scale"), doc)
                 .def("__rmul__", [](const A& a, int s) { return a * s; }, nb::arg("scale"), doc)
-                .def("__rmul__", [](const A& a, double s) { return a * s; }, nb::arg("scale"), doc);
+                .def("__rmul__", [](const A& a, double s) { return a * s; }, nb::arg("scale"), doc)
+                .def("__rmul__", [](const A& a, std::complex<double> s) { return a * s; }, nb::arg("scale"), doc)
+                .def("__neg__", [](const A& a) { return a * -1; }, "-1 * self.");
+}
+
+// a / s for an int, float or complex s, as a * (1 / s); weighted(a) turns an
+// unweighted operator into its weighted form first.
+template <typename A, typename Cls, typename Weighted>
+void bind_division(Cls& cls, Weighted weighted) {
+        const auto zero_division = [] {
+                PyErr_SetString(PyExc_ZeroDivisionError, "division by zero");
+                throw nb::python_error();
+        };
+        cls.def("__truediv__", [weighted, zero_division](const A& a, double s) {
+                        if (s == 0.0) zero_division();
+                        return weighted(a) * (1.0 / s);
+                }, nb::arg("scale"), "self * (1 / scale) for an int or float scale.")
+           .def("__truediv__", [weighted, zero_division](const A& a, std::complex<double> s) {
+                        if (s == std::complex<double>(0.0)) zero_division();
+                        return weighted(a) * (std::complex<double>(1.0) / s);
+                }, nb::arg("scale"), "self * (1 / scale) for a complex scale.");
+}
+
+// a * e and e * a for a symbolic e (scaled_by in Arithmetic.h).
+template <typename A, typename Cls>
+void bind_symbolic_scale(Cls& cls) {
+        cls.def("__mul__", [](const A& a, const SymEngine::Expression& e) { return scaled_by(a, e); }, nb::arg("scale"),
+                "Every coefficient multiplied by a symbolic expression; the result is symbolic.")
+           .def("__rmul__", [](const A& a, const SymEngine::Expression& e) { return scaled_by(a, e); }, nb::arg("scale"),
+                "Every coefficient multiplied by a symbolic expression; the result is symbolic.");
+}
+
+// a == b and a != b for an A and a B, decided by eq(a, b).
+template <typename A, typename B, typename Cls, typename Eq>
+void bind_eq(Cls& cls, Eq eq, const char* doc) {
+        cls.def("__eq__", [eq](const A& a, const B& b) { return static_cast<bool>(eq(a, b)); }, doc)
+           .def("__ne__", [eq](const A& a, const B& b) { return !static_cast<bool>(eq(a, b)); }, "Negation of ==.");
+}
+
+// == with any object not compared above gives NotImplemented, so Python answers
+// False (and != True) instead of raising a TypeError. Registered after all other
+// __eq__ overloads, which are tried first.
+template <typename A, typename Cls>
+void bind_eq_fallback(Cls& cls) {
+        cls.def("__eq__", [](const A&, nb::handle) { return nb::borrow<nb::object>(Py_NotImplemented); },
+                nb::arg("other").none(), "NotImplemented for objects of other types.")
+           .def("__ne__", [](const A&, nb::handle) { return nb::borrow<nb::object>(Py_NotImplemented); },
+                nb::arg("other").none(), "NotImplemented for objects of other types.");
 }
 
 // Arithmetic of an unweighted string or set U with a weighted operator W
@@ -380,7 +428,6 @@ NB_MODULE(_core, m) {
                 .def("__rmul__", [](const PauliString<std::complex<double>>& self, const PauliString<SymEngine::Expression>& other){return other * self;}, "Product other * self with a symbolic Pauli string; the result is symbolic.")
                 .def("__repr__",  &PauliString<std::complex<double>>::to_string, "Human-readable form, e.g. '1.000000 + 0.000000i : X(0)Z(2)'.")
                 .def("__str__",  &PauliString<std::complex<double>>::to_string, "Human-readable form, e.g. '1.000000 + 0.000000i : X(0)Z(2)'.")
-                .def("__eq__", &PauliString<std::complex<double>>::operator==, "True if both the operator and the coefficient are equal (see equals() for the operator only).")
                 .def("__hash__", [](const PauliString<std::complex<double>>& ps) {
                         return static_cast<Py_ssize_t>(ps.hash());
                 }, "Hash over the operator part (x, y); ignores the coefficient.")
@@ -464,7 +511,6 @@ NB_MODULE(_core, m) {
                 .def("__rmul__", [](const PauliString<SymEngine::Expression>& self, const PauliString<std::complex<double>>& other){return other * self;}, "Product other * self with a complex Pauli string; the result is symbolic.")
                 .def("__repr__",  &PauliString<SymEngine::Expression>::to_string, "Human-readable form, e.g. '1.000000 + 0.000000i : X(0)Z(2)'.")
                 .def("__str__",  &PauliString<SymEngine::Expression>::to_string, "Human-readable form, e.g. '1.000000 + 0.000000i : X(0)Z(2)'.")
-                .def("__eq__", &PauliString<SymEngine::Expression>::operator==, "True if both the operator and the coefficient are equal (see equals() for the operator only).")
                 .def("__hash__", [](const PauliString<SymEngine::Expression>& ps) {
                         return static_cast<Py_ssize_t>(ps.hash());
                 }, "Hash over the operator part (x, y); ignores the coefficient.")
@@ -521,7 +567,6 @@ NB_MODULE(_core, m) {
         auto cls_qhc = nb::class_<QubitHamiltonian<std::complex<double>>>(m, "QubitHamiltonianComplex", "A qubit Hamiltonian: a sum of Pauli strings with complex coefficients. Kept compacted: no two terms share an operator and zero terms are dropped.")
                 .def(nb::init<const std::vector<PauliString<std::complex<double>>>&>(), "From a list of Pauli strings (equal operators are merged).")
                 .def(nb::init<const Hamiltonian_structure<std::complex<double>>&>(), "From a list of (coefficient, {qubit: 'X'/'Y'/'Z'}) pairs.")
-                .def("__eq__", &QubitHamiltonian<std::complex<double>>::operator==, "True if both have the same terms with equal coefficients (order-independent).")
                 .def("contains", [](const QubitHamiltonian<std::complex<double>>& qh, const PauliString<std::complex<double>>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
                 .def("contains", [](const QubitHamiltonian<std::complex<double>>& qh, const PauliString<SymEngine::Expression>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
                 .def("contains", [](const QubitHamiltonian<std::complex<double>>& qh, const std::unordered_map<int, std::string>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the Pauli string {qubit: 'X'} in the Hamiltonian (0 if absent).")
@@ -559,6 +604,10 @@ NB_MODULE(_core, m) {
                 .def("targeted_commutator", &QubitHamiltonian<std::complex<double>>::targeted_commutator,
                         nb::arg("other"), nb::arg("target"),
                         "Coefficient of the target Pauli string in the commutator, via a hash-join, O(min(len(A), len(B))).")
+                .def("targeted_commutator", [](const QHC& h, const PSC& other, const PSC& target) {
+                                return h.targeted_commutator(QHC(std::vector<PSC>{other}), target);
+                        }, nb::arg("other"), nb::arg("target"),
+                        "Coefficient of the target Pauli string in [self, other] for a single Pauli string other.")
                 .def("compact", &QubitHamiltonian<std::complex<double>>::compact, "Merge terms with equal operators and drop zero terms, in place; returns the result. Every operation already does this.")
                 .def("set_all_coeff", &QubitHamiltonian<std::complex<double>>::set_all_coeff, nb::arg("value"), "Return a copy with every term's coefficient replaced by value.")
                 .def("simplify", &QubitHamiltonian<std::complex<double>>::simplify, nb::arg("threshold") = 0.0, "Copy without the terms whose abs(coefficient) <= threshold.")
@@ -584,7 +633,6 @@ NB_MODULE(_core, m) {
         auto cls_qhs = nb::class_<QubitHamiltonian<SymEngine::Expression>>(m, "QubitHamiltonianSymbolic", "A qubit Hamiltonian: a sum of Pauli strings with symbolic (SymEngine) coefficients. Kept compacted: no two terms share an operator and zero terms are dropped.")
                 .def(nb::init<const std::vector<PauliString<SymEngine::Expression>>&>(), "From a list of Pauli strings (equal operators are merged).")
                 .def(nb::init<const Hamiltonian_structure<SymEngine::Expression>&>(), "From a list of (coefficient, {qubit: 'X'/'Y'/'Z'}) pairs.")
-                .def("__eq__", &QubitHamiltonian<SymEngine::Expression>::operator==, "True if both have the same terms with equal coefficients (order-independent).")
                 .def("contains", [](const QubitHamiltonian<SymEngine::Expression>& qh, const PauliString<SymEngine::Expression>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
                 .def("contains", [](const QubitHamiltonian<SymEngine::Expression>& qh, const PauliString<std::complex<double>>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
                 .def("contains", [](const QubitHamiltonian<SymEngine::Expression>& qh, const std::unordered_map<int, std::string>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the Pauli string {qubit: 'X'} in the Hamiltonian (0 if absent).")
@@ -623,6 +671,10 @@ NB_MODULE(_core, m) {
                 .def("targeted_commutator", &QubitHamiltonian<SymEngine::Expression>::targeted_commutator,
                         nb::arg("other"), nb::arg("target"),
                         "Coefficient of the target Pauli string in the commutator, via a hash-join, O(min(len(A), len(B))).")
+                .def("targeted_commutator", [](const QHS& h, const PSS& other, const PSS& target) {
+                                return h.targeted_commutator(QHS(std::vector<PSS>{other}), target);
+                        }, nb::arg("other"), nb::arg("target"),
+                        "Coefficient of the target Pauli string in [self, other] for a single Pauli string other.")
                 .def("diff", &QubitHamiltonian<SymEngine::Expression>::diff, "Derivative of every coefficient with respect to the named symbol.")
                 .def("compact", &QubitHamiltonian<SymEngine::Expression>::compact, "Merge terms with equal operators and drop zero terms, in place; returns the result. Every operation already does this.")
                 .def("set_all_coeff", &QubitHamiltonian<SymEngine::Expression>::set_all_coeff, nb::arg("value"), "Return a copy with every term's coefficient replaced by value.")
@@ -832,18 +884,18 @@ NB_MODULE(_core, m) {
                 "number of qubits.");
 
         // Scaling cycles and orbits by an int or float.
-        bind_scale_ops<CYC>(cls_cy, "The cycle with its coefficient scaled by an int or float.");
-        bind_scale_ops<CYS>(cls_cys_sym, "The cycle with its coefficient scaled by an int or float.");
+        bind_scale_ops<CYC>(cls_cy, "The cycle with its coefficient scaled by an int, float or complex number.");
+        bind_scale_ops<CYS>(cls_cys_sym, "The cycle with its coefficient scaled by an int, float or complex number.");
         bind_scale_ops<CSC>(cls_cys,
-                "The sum with every coefficient scaled by an int or float; scaling by 0 gives the empty sum.");
+                "The sum with every coefficient scaled by an int, float or complex number; scaling by 0 gives the empty sum.");
         bind_scale_ops<CSS>(cls_css,
-                "The sum with every coefficient scaled by an int or float; scaling by 0 gives the empty sum.");
+                "The sum with every coefficient scaled by an int, float or complex number; scaling by 0 gives the empty sum.");
         bind_scale_ops<PauliOrbit>(cls_or,
-                "scale * self as a PauliOrbitSum, for an int or float; scaling by 0 gives the empty sum.");
+                "scale * self as a PauliOrbitSum, for an int, float or complex number; scaling by 0 gives the empty sum.");
         bind_scale_ops<OSC>(cls_ors,
-                "The sum with every coefficient scaled by an int or float; scaling by 0 gives the empty sum.");
+                "The sum with every coefficient scaled by an int, float or complex number; scaling by 0 gives the empty sum.");
         bind_scale_ops<OSS>(cls_oss,
-                "The sum with every coefficient scaled by an int or float; scaling by 0 gives the empty sum.");
+                "The sum with every coefficient scaled by an int, float or complex number; scaling by 0 gives the empty sum.");
 
         // Pauli decomposition of a matrix (PauliDecomposition.h).
         cls_qhc.def_static("from_matrix",
@@ -921,4 +973,96 @@ NB_MODULE(_core, m) {
                    "The weighted Hamiltonian with coefficient scale * i**k on every element.");
         bind_contains_unweighted<QHC>(cls_qhc);
         bind_contains_unweighted<QHS>(cls_qhs);
+
+        // Division by a number and multiplication by a symbolic expression, for every kind.
+        const auto same = [](const auto& a) -> const auto& { return a; };
+        const auto weighted = [](const auto& a) { return as_weighted(a); };
+        bind_division<PSC>(cls_psc, same);
+        bind_division<PSS>(cls_pss, same);
+        bind_division<QHC>(cls_qhc, same);
+        bind_division<QHS>(cls_qhs, same);
+        bind_division<CYC>(cls_cy, same);
+        bind_division<CYS>(cls_cys_sym, same);
+        bind_division<CSC>(cls_cys, same);
+        bind_division<CSS>(cls_css, same);
+        bind_division<PauliOrbit>(cls_or, same);
+        bind_division<OSC>(cls_ors, same);
+        bind_division<OSS>(cls_oss, same);
+        bind_division<UPS>(cls_up, weighted);
+        bind_division<UQH>(cls_uq, weighted);
+        bind_symbolic_scale<PSC>(cls_psc);
+        bind_symbolic_scale<PSS>(cls_pss);
+        bind_symbolic_scale<QHC>(cls_qhc);
+        bind_symbolic_scale<QHS>(cls_qhs);
+        bind_symbolic_scale<CYC>(cls_cy);
+        bind_symbolic_scale<CYS>(cls_cys_sym);
+        bind_symbolic_scale<CSC>(cls_cys);
+        bind_symbolic_scale<CSS>(cls_css);
+        bind_symbolic_scale<PauliOrbit>(cls_or);
+        bind_symbolic_scale<OSC>(cls_ors);
+        bind_symbolic_scale<OSS>(cls_oss);
+        bind_symbolic_scale<UPS>(cls_up);
+        bind_symbolic_scale<UQH>(cls_uq);
+
+        // Two unweighted operators: inner product of their weighted forms; -set.
+        const char* unweighted_ip = "Normalized Hilbert-Schmidt inner product; both count with coefficient 1.0 * i**phase.";
+        cls_up.def("inner_product", [](const UPS& a, const UPS& b) { return inner_product(a, b); }, nb::arg("other"), unweighted_ip)
+              .def("inner_product", [](const UPS& a, const UQH& b) { return inner_product(a, b); }, nb::arg("other"), unweighted_ip);
+        cls_uq.def("inner_product", [](const UQH& a, const UPS& b) { return inner_product(a, b); }, nb::arg("other"), unweighted_ip)
+              .def("inner_product", [](const UQH& a, const UQH& b) { return inner_product(a, b); }, nb::arg("other"), unweighted_ip)
+              .def("__neg__", [](const UQH& h) { return -h; }, "Every element multiplied by -1, as a set.");
+
+        // Equality. Complex and symbolic operators of the same kind compare by value
+        // (the complex one counts as symbolic); anything else is not equal.
+        const char* ps_eq = "True if both the operator and the coefficient are equal (see equals() for the operator only).";
+        const auto sym_ps = [](const PSC& a) { return PSS(a.x, a.y, SymEngine::Expression(a.coeff)); };
+        bind_eq<PSC, PSC>(cls_psc, [](const PSC& a, const PSC& b) { return a == b; }, ps_eq);
+        bind_eq<PSC, PSS>(cls_psc, [sym_ps](const PSC& a, const PSS& b) { return sym_ps(a) == b; }, ps_eq);
+        bind_eq<PSS, PSS>(cls_pss, [](const PSS& a, const PSS& b) { return a == b; }, ps_eq);
+        bind_eq<PSS, PSC>(cls_pss, [sym_ps](const PSS& a, const PSC& b) { return a == sym_ps(b); }, ps_eq);
+        const char* qh_eq = "True if both have the same terms with equal coefficients (order-independent).";
+        const auto sym_qh = [](const QHC& h) { return pauliengine_detail::convert_coeffs<SymEngine::Expression>(h); };
+        bind_eq<QHC, QHC>(cls_qhc, [](const QHC& a, const QHC& b) { return a == b; }, qh_eq);
+        bind_eq<QHC, QHS>(cls_qhc, [sym_qh](const QHC& a, const QHS& b) { return sym_qh(a) == b; }, qh_eq);
+        bind_eq<QHS, QHS>(cls_qhs, [](const QHS& a, const QHS& b) { return a == b; }, qh_eq);
+        bind_eq<QHS, QHC>(cls_qhs, [sym_qh](const QHS& a, const QHC& b) { return a == sym_qh(b); }, qh_eq);
+        // Sums of cycles or orbits are equal if their difference has no terms left
+        // (cancelling coefficients are dropped exactly, symbolic ones after expanding).
+        const char* sum_eq = "True if both have the same summands with equal coefficients.";
+        const auto same_sum = [](const auto& a, const auto& b) {
+                try {
+                        return (a - b).size() == 0;
+                } catch (const std::invalid_argument&) {
+                        return false;  // different numbers of qubits
+                }
+        };
+        bind_eq<CSC, CSC>(cls_cys, same_sum, sum_eq);
+        bind_eq<CSC, CSS>(cls_cys, same_sum, sum_eq);
+        bind_eq<CSS, CSS>(cls_css, same_sum, sum_eq);
+        bind_eq<CSS, CSC>(cls_css, same_sum, sum_eq);
+        bind_eq<OSC, OSC>(cls_ors, same_sum, sum_eq);
+        bind_eq<OSC, OSS>(cls_ors, same_sum, sum_eq);
+        bind_eq<OSS, OSS>(cls_oss, same_sum, sum_eq);
+        bind_eq<OSS, OSC>(cls_oss, same_sum, sum_eq);
+        // Mutable sums that compare by value cannot be hashed by identity.
+        cls_cys.attr("__hash__") = nb::none();
+        cls_css.attr("__hash__") = nb::none();
+        cls_ors.attr("__hash__") = nb::none();
+        cls_oss.attr("__hash__") = nb::none();
+        bind_eq_fallback<PSC>(cls_psc);
+        bind_eq_fallback<PSS>(cls_pss);
+        bind_eq_fallback<QHC>(cls_qhc);
+        bind_eq_fallback<QHS>(cls_qhs);
+        bind_eq_fallback<CYC>(cls_cy);
+        bind_eq_fallback<CYS>(cls_cys_sym);
+        bind_eq_fallback<CSC>(cls_cys);
+        bind_eq_fallback<CSS>(cls_css);
+        bind_eq_fallback<PauliOrbit>(cls_or);
+        bind_eq_fallback<OSC>(cls_ors);
+        bind_eq_fallback<OSS>(cls_oss);
+        bind_eq_fallback<UPS>(cls_up);
+        bind_eq_fallback<UQH>(cls_uq);
+        // numpy scalars on the left: let Python call __rmul__ instead of numpy
+        // treating the set as a sequence.
+        cls_uq.attr("__array_ufunc__") = nb::none();
 }

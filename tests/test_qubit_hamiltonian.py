@@ -1128,6 +1128,14 @@ class TestTargetedCommutator:
         b = _complex_qh((1.0, {1: "Z"}))  # disjoint -> commute -> empty commutator
         assert a.targeted_commutator(b, pe.PauliString(1.0, {0: "X", 1: "Z"})) == pytest.approx(0j)
 
+    def test_other_is_pauli_string(self):
+        h = _complex_qh((1.0, {0: "X"}), (0.5, {0: "Y", 1: "Z"}))
+        x = pe.PauliString(2.0, {0: "X"})
+        full = h.commutator(_complex_qh((2.0, {0: "X"})))
+        for c, d in full.to_dictionary():
+            assert h.targeted_commutator(x, pe.PauliString(1.0, d)) == pytest.approx(complex(c))
+        assert h.targeted_commutator(x, pe.PauliString(1.0, {0: "Z"})) == pytest.approx(0j)
+
 
 class TestContains:
     def _qh(self):

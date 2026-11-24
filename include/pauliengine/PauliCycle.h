@@ -320,6 +320,13 @@ class PauliCycle {
                 /// The cycle with its coefficient multiplied by `scale`.
                 PauliCycle operator*(int scale) const { return *this * static_cast<double>(scale); }
 
+                /// The cycle with its coefficient multiplied by a complex `scale`.
+                PauliCycle operator*(std::complex<double> scale) const {
+                        PauliCycle out = *this;
+                        out.Base.coeff = out.Base.coeff * Coeff(scale);
+                        return out;
+                }
+
                 /// [C(P), C(Q)] = sum_k C([P, R^k Q]) (Eq. 40). Only shifts k at which
                 /// the supports overlap can contribute (Corollary 3); different shifts
                 /// landing in the same rotation orbit are merged by PauliCycleSum.

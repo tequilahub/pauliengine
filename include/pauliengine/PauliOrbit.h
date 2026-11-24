@@ -213,6 +213,15 @@ class PauliOrbit {
                 /// scale * this as a PauliOrbitSum.
                 PauliOrbitSum<Coeff> operator*(int scale) const { return *this * static_cast<double>(scale); }
 
+                /// scale * this as a PauliOrbitSum, for a complex scale.
+                PauliOrbitSum<Coeff> operator*(std::complex<double> scale) const {
+                        PauliOrbitSum<Coeff> out(n_qubits);
+                        if (scale != std::complex<double>(0.0)) {
+                                out.add(*this, Coeff(scale));
+                        }
+                        return out;
+                }
+
                 /// Product this * other in the orbit basis (complex coefficients).
                 PauliOrbitSum<Coeff> operator*(const PauliOrbit& other) const {
                         require_same_n_qubits(other, "operator*");
@@ -301,7 +310,8 @@ class PauliOrbit {
                         // letters fixed, the column sums of `other` remain as constraints:
                         // column Z determines nIZ from nZI, and column X then determines
                         // nXY, so only seven loops remain (column I follows from the others,
-                        // since rows and columns both add up to n). The weight
+                        // since rows and columns both add up to n). Column Y is checked before
+                        // the seventh, which therefore runs for O(n^5) tuples only. The weight
                         // n! / prod(cell!) uses the cached inverse factorials, with partial
                         // products hoisted to the loop level where their cells are fixed.
                         for (int nXI = 0; nXI <= tp; ++nXI)
@@ -317,12 +327,19 @@ class PauliOrbit {
                                     // Column Z: nXZ + nYZ + nZZ + nIZ = r2 with
                                     // nZZ = r1 - nZX - nZY - nZI  =>  nIZ = nZI + dZ.
                                     const int dZ = r2 - r1 - nXZ - nYZ + nZX + nZY;
+                                    // Column X with nXX = p1 - nXY - nXZ - nXI and
+                                    // nYX = tr - nZI - nIZ - nXY  =>  2 * nXY = num0 - 2 * nZI.
+                                    const int num0 = p1 - nXZ - nXI + tr - dZ + nZX + nIX - p2;
+                                    // Neither the parity of 2 * nXY nor column Y (nXY + nYY +
+                                    // nZY + nIY = q2, with nYY from row Y) depends on nZI, so
+                                    // both are checked before its loop: the six loops above
+                                    // and the nZI loop over the tuples that pass give O(n^6).
+                                    if (num0 & 1) continue;
+                                    if (p1 + q1 - p2 - nXZ - nXI + nZX + nIX - nYZ - nYI + nZY + nIY != q2) continue;
                                     for (int nZI = std::max(0, -dZ); 2 * nZI + dZ <= tr; ++nZI) {
                                       const int nIZ = nZI + dZ;
-                                      // Column X with nXX = p1 - nXY - nXZ - nXI and
-                                      // nYX = tr - nZI - nIZ - nXY  =>  2 * nXY = num.
-                                      const int num = p1 - nXZ - nXI + tr - nZI - nIZ + nZX + nIX - p2;
-                                      if (num < 0 || (num & 1)) continue;
+                                      const int num = num0 - 2 * nZI;
+                                      if (num < 0) break;  // num falls with nZI
                                       const int nXY = num / 2;
                                       const int nYX = tr - nZI - nIZ - nXY;
                                       if (nYX < 0) continue;
@@ -333,9 +350,6 @@ class PauliOrbit {
                                       const int nZZ = r1 - nZX - nZY - nZI;
                                       const int nII = s1 - nIX - nIY - nIZ;
                                       if (nXX < 0 || nYY < 0 || nZZ < 0 || nII < 0) continue;
-
-                                      // Remaining independent column constraint (Y).
-                                      if (nXY + nYY + nZY + nIY != q2) continue;
 
                                       // Parity: only anticommuting patterns (D odd).
                                       const int D = nXY + nXZ + nYX + nYZ + nZX + nZY;

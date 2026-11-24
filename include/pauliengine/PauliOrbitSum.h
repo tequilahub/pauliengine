@@ -65,6 +65,13 @@ class PauliOrbitSum {
                 /// Every coefficient multiplied by `scale`; scaling by 0 gives the empty sum.
                 PauliOrbitSum operator*(double scale) const;
                 PauliOrbitSum operator*(int scale) const { return *this * static_cast<double>(scale); }
+                /// Every coefficient multiplied by a complex `scale`; scaling by 0 gives the empty sum.
+                PauliOrbitSum operator*(std::complex<double> scale) const {
+                        if (scale == std::complex<double>(0.0)) return PauliOrbitSum(n_qubits);
+                        PauliOrbitSum out = *this;
+                        for (auto& c : out.coeffs) c = c * Coeff(scale);
+                        return out;
+                }
 
                 /// Coefficient of `target` in [this, other], without building the full commutator.
                 Coeff targeted_commutator(const PauliOrbitSum& other, const Orbit& target) const;

@@ -90,6 +90,14 @@ class unweighted_QubitHamiltonian {
                         return *this;
                 }
 
+                /// Every element multiplied by -1 (its phase i^k becomes i^(k+2)).
+                unweighted_QubitHamiltonian operator-() const {
+                        std::vector<unweighted_pauliString> negated;
+                        negated.reserve(data_.size());
+                        for (const auto& term : data_) negated.push_back(-term);
+                        return unweighted_QubitHamiltonian(negated);
+                }
+
                 /// The set of all products a * b in the order of a, then b.
                 unweighted_QubitHamiltonian operator*(const unweighted_QubitHamiltonian& other) const {
                         return pairwise(other, false);

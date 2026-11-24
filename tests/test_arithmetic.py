@@ -161,3 +161,112 @@ class TestOrbitExpansion:
             big.to_qubit_hamiltonian()
         with pytest.raises((ValueError, RuntimeError)):
             big + pe.PauliString(1.0, {0: "X"})
+
+
+class TestConsistentTypes:
+    """The same kind of operation gives the same kind of result for every operand."""
+
+    def test_mixed_pauli_string_commutator_is_a_pauli_string(self):
+        x = pe.PauliString(1.0, {0: "X"})
+        y = _core.PauliStringSymbolic(_core.Expression("a"), {0: "Y"})
+        for c in (x.commutator(y), y.commutator(x), y.commutator(pe.PauliString("X"))):
+            assert isinstance(c, _core.PauliStringSymbolic)
+        assert x.commutator(y) == _core.PauliStringSymbolic(_core.Expression("2*I*a"), {0: "Z"})
+
+    @pytest.mark.parametrize("make", [
+        lambda: pe.PauliCycle(4, "XZII", 0.5),
+        lambda: pe.PauliCycleSum([pe.PauliCycle(4, "XIII", 0.5)]),
+        lambda: pe.PauliOrbit(4, 1, 0, 1),
+        lambda: pe.PauliOrbitSum(4, [(pe.PauliOrbit(4, 1, 0, 1), 0.5)]),
+    ])
+    def test_complex_scaling_and_negation(self, make):
+        op = make()
+        expected = op.to_qubit_hamiltonian() * 2j
+        assert (op * 2j).to_qubit_hamiltonian() == expected
+        assert (2j * op).to_qubit_hamiltonian() == expected
+        assert (-op).to_qubit_hamiltonian() == op.to_qubit_hamiltonian() * -1
+
+    def test_equality_across_coefficient_types(self):
+        x = pe.PauliString(1.0, {0: "X"})
+        xs = _core.PauliStringSymbolic(_core.Expression("1"), {0: "X"})
+        assert x == xs and xs == x and hash(x) == hash(xs)
+        assert x != xs * 2
+        assert pe.QubitHamiltonian([x]) == _core.QubitHamiltonianSymbolic([xs])
+        assert type(x == x) is bool
+
+    def test_equality_with_other_objects_is_false(self):
+        x = pe.PauliString(1.0, {0: "X"})
+        for other in (1, "X", None, pe.QubitHamiltonian([x]), pe.PauliOrbit(4, 1, 0, 0)):
+            assert not (x == other)
+            assert x != other
+
+    def test_sums_compare_by_value(self):
+        c = pe.PauliCycle(4, "XIII", 0.5)
+        assert pe.PauliCycleSum([c]) == pe.PauliCycleSum([c])
+        assert pe.PauliCycleSum([c]) != pe.PauliCycleSum([c * 2])
+        o = pe.PauliOrbit(4, 1, 0, 0)
+        assert pe.PauliOrbitSum(4, [(o, 1.0)]) == pe.PauliOrbitSum(4, [(o, 1.0)])
+        assert pe.PauliOrbitSum(4, [(o, 1.0)]) != pe.PauliOrbitSum(4, [(o, 2.0)])
+        with pytest.raises(TypeError):
+            hash(pe.PauliCycleSum([c]))
+
+
+ALL_KINDS = [
+    lambda: pe.PauliString(1.5, {0: "X", 1: "Z"}),
+    lambda: pe.QubitHamiltonian([pe.PauliString(1.5, {0: "X"}), pe.PauliString(0.5, {1: "Y"})]),
+    lambda: pe.PauliCycle(4, "XZII", 0.5),
+    lambda: pe.PauliCycleSum([pe.PauliCycle(4, "XIII", 0.5), pe.PauliCycle(4, "YZII", 2.0)]),
+    lambda: pe.PauliOrbit(4, 1, 0, 1),
+    lambda: pe.PauliOrbitSum(4, [(pe.PauliOrbit(4, 1, 0, 1), 0.5)]),
+    lambda: _core.unweighted_pauliString("XZ"),
+    lambda: _core.unweighted_QubitHamiltonian([_core.unweighted_pauliString("XZ"), _core.unweighted_pauliString("YI")]),
+]
+
+
+def expanded(op):
+    """The operator as a QubitHamiltonian, symbolic ones evaluated at b = 0.7."""
+    if isinstance(op, (_core.unweighted_pauliString, _core.unweighted_QubitHamiltonian)):
+        op = op * 1.0
+    if not isinstance(op, (_core.QubitHamiltonianComplex, _core.QubitHamiltonianSymbolic)):
+        op = op.to_qubit_hamiltonian() if hasattr(op, "to_qubit_hamiltonian") else pe.QubitHamiltonian([op])
+    if isinstance(op, _core.QubitHamiltonianSymbolic):
+        op = op.subs({"b": 0.7})
+        op = pe.QubitHamiltonian([pe.PauliString(_core.PauliStringSymbolic.to_complex(c), d) for c, d in op.to_dictionary()])
+    return op
+
+
+class TestScalars:
+    @pytest.mark.parametrize("make", ALL_KINDS)
+    @pytest.mark.parametrize("scale", [2, 2.5, 2j])
+    def test_division_is_multiplication_by_the_inverse(self, make, scale):
+        op = make()
+        assert expanded(op / scale) == expanded(op) * (1 / scale)
+
+    @pytest.mark.parametrize("make", ALL_KINDS)
+    def test_division_by_zero(self, make):
+        with pytest.raises(ZeroDivisionError):
+            make() / 0
+
+    @pytest.mark.parametrize("make", ALL_KINDS)
+    def test_symbolic_scale_on_both_sides(self, make):
+        op, b = make(), _core.Expression("b")
+        assert expanded(op * b) == expanded(op) * 0.7
+        assert expanded(b * op) == expanded(op) * 0.7
+
+    def test_symbolic_scale_by_zero_drops_terms(self):
+        h = pe.QubitHamiltonian([pe.PauliString(1.0, {0: "X"})])
+        assert len(h * _core.Expression("0")) == 0
+
+
+class TestUnweightedCompletions:
+    def test_inner_product_between_unweighted_operators(self):
+        s = _core.unweighted_pauliString("XZ")
+        t = _core.unweighted_pauliString("YI")
+        h = _core.unweighted_QubitHamiltonian([s, t])
+        for a, b in itertools.product((s, t, h), repeat=2):
+            assert a.inner_product(b) == pytest.approx(expanded(a).inner_product(expanded(b)))
+
+    def test_negated_set(self):
+        h = _core.unweighted_QubitHamiltonian([_core.unweighted_pauliString("XZ"), _core.unweighted_pauliString("YI")])
+        assert isinstance(-h, _core.unweighted_QubitHamiltonian)
+        assert expanded(-h) == expanded(h) * -1

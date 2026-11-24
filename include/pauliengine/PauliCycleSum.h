@@ -55,6 +55,13 @@ class PauliCycleSum {
                 /// Every coefficient multiplied by `scale`; scaling by 0 gives the empty sum.
                 PauliCycleSum operator*(double scale) const;
                 PauliCycleSum operator*(int scale) const { return *this * static_cast<double>(scale); }
+                /// Every coefficient multiplied by a complex `scale`; scaling by 0 gives the empty sum.
+                PauliCycleSum operator*(std::complex<double> scale) const {
+                        if (scale == std::complex<double>(0.0)) return PauliCycleSum();
+                        PauliCycleSum out = *this;
+                        for (auto& c : out.data) c.Base.coeff = c.Base.coeff * Coeff(scale);
+                        return out;
+                }
 
                 /// Coefficient of `target`'s orbit in [this, other], without building
                 /// the full commutator.
