@@ -1,5 +1,8 @@
 <p align="center">
-  <img alt="PauliEngine" src="docs/logo/pauliengine-lockup-paulis-color.svg" width="420">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo/pauliengine-lockup-paulis-reverse.svg">
+    <img alt="PauliEngine" src="docs/logo/pauliengine-lockup-paulis-color.svg" width="420">
+  </picture>
 </p>
 
 # PauliEngine — Fast Arithmetic for Quantum Operators
