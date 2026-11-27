@@ -13,6 +13,9 @@ Pauli decomposition of matrices.
 
 ### Added
 
+- `diff(symbol)` and `subs({name: value})` for `PauliCycleSymbolic`, `PauliCycleSumSymbolic`
+  and `PauliOrbitSumSymbolic`, as for Pauli strings and Hamiltonians; terms of a sum that become
+  zero are dropped.
 - Pauli cycles, orbits and their sums take complex scalars (`c * 2j`, `1j * orbit`) and
   unary minus, like Pauli strings and Hamiltonians.
 - Division by a number (`x / 2`, `x / 2j`) for every operator, and multiplication by a
