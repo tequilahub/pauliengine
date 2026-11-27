@@ -5,11 +5,14 @@
 /// types, std::complex<double> and SymEngine::Expression.
 
 #include <complex>
+#include <string>
 #include <type_traits>
+#include <unordered_map>
 
 #include <symengine/basic.h>
 #include <symengine/expression.h>
 #include <symengine/number.h>
+#include <symengine/symbol.h>
 
 namespace pauliengine_detail {
 
@@ -53,6 +56,24 @@ To coeff_as(const From& c) {
         } else {
                 return To(c);
         }
+}
+
+/// Values for symbols by name, as taken by subs().
+using SymbolValues = std::unordered_map<std::string, std::complex<double>>;
+
+/// Derivative of a symbolic coefficient by the symbol `name`.
+inline SymEngine::Expression coeff_diff(const SymEngine::Expression& c, const std::string& name) {
+        return c.diff(SymEngine::symbol(name));
+}
+
+/// A symbolic coefficient with the given values substituted for its symbols;
+/// symbols without a value stay.
+inline SymEngine::Expression coeff_subs(const SymEngine::Expression& c, const SymbolValues& values) {
+        SymEngine::map_basic_basic substitutions;
+        for (const auto& [name, value] : values) {
+                substitutions[SymEngine::symbol(name)] = SymEngine::Expression(value).get_basic();
+        }
+        return c.subs(substitutions);
 }
 
 }  // namespace pauliengine_detail

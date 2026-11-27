@@ -414,12 +414,12 @@ class QubitHamiltonian{
                         for (size_t i = 0; i < entry.x.size(); ++i) {
                                 uint64_t x_word = entry.x[i];
                                 uint64_t y_word = entry.y[i];
-                                for (int j = 0; j < BITS_IN_INTEGER; ++j) {
+                                for (size_t j = 0; j < BITS_IN_INTEGER; ++j) {
                                         uint64_t bit = (uint64_t)1 << j;
                                         bool x_bit = x_word & bit;
                                         bool y_bit = y_word & bit;
                                         if (!x_bit && !y_bit) continue;
-                                        int index = i * BITS_IN_INTEGER + j;
+                                        const int index = static_cast<int>(i * BITS_IN_INTEGER + j);
                                         if (x_bit && y_bit) {
                                                 temp[(int)index] = "Z";
                                         } else if (x_bit) {
@@ -1762,8 +1762,8 @@ class QubitHamiltonian{
         else throw std::runtime_error("Unknown Pauli operator");
 }
     static Matrix2D tensor_product(const Matrix2D& A, const Matrix2D& B){
-        int rows = A.size() * B.size();
-        int cols = A[0].size() * B[0].size();
+        const size_t rows = A.size() * B.size();
+        const size_t cols = A[0].size() * B[0].size();
         Matrix2D result(rows, std::vector<std::complex<double>>(cols, 0));
 
         for (int i=0; i<(int)A.size(); ++i) {

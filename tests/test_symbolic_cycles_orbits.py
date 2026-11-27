@@ -184,3 +184,39 @@ class TestOrbitSum:
         (x, _), (xc, _) = cycles
         assert isinstance(sym * x, _core.QubitHamiltonianSymbolic)
         assert same_operator(sym * x, num * xc)
+
+
+class TestDiffSubs:
+    """diff() and subs() act on the coefficients, as on the expanded Hamiltonian."""
+
+    @staticmethod
+    def operators():
+        cy = _core.PauliCycleSymbolic(4, "XZII", _core.Expression("a**2*b"))
+        cs = _core.PauliCycleSumSymbolic([cy, _core.PauliCycleSymbolic(4, "YIII", _core.Expression("b + 3"))])
+        os = pe.PauliOrbitSum(4, [(pe.PauliOrbit(4, 1, 0, 1), "a*b"), (pe.PauliOrbit(4, 0, 1, 0), "b")])
+        return [cy, cs, os]
+
+    @pytest.mark.parametrize("index", range(3))
+    def test_diff_matches_expanded(self, index):
+        op = self.operators()[index]
+        for name in ("a", "b"):
+            assert as_dict(op.diff(name).to_qubit_hamiltonian()) == pytest.approx(
+                as_dict(op.to_qubit_hamiltonian().diff(name)))
+
+    @pytest.mark.parametrize("index", range(3))
+    def test_subs_matches_expanded(self, index):
+        op = self.operators()[index]
+        values = {"a": 0.5, "b": 2.0}
+        assert as_dict(op.subs(values).to_qubit_hamiltonian()) == pytest.approx(
+            as_dict(op.to_qubit_hamiltonian().subs(values)))
+
+    def test_partial_subs_keeps_other_symbols(self):
+        cy = self.operators()[0].subs({"a": 2})
+        assert isinstance(cy, _core.PauliCycleSymbolic)
+        assert value(cy.diff("b").base.coeff) == pytest.approx(4.0)
+
+    def test_zero_terms_are_dropped(self):
+        cs, os = self.operators()[1], self.operators()[2]
+        assert len(cs.diff("a")) == 1
+        assert len(os.diff("a")) == 1
+        assert len(os.subs({"b": 0})) == 0

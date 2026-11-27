@@ -63,6 +63,23 @@ class PauliCycleSum {
                         return out;
                 }
 
+                /// Derivative of every coefficient by the symbol `name`; summands whose
+                /// derivative is zero are dropped (symbolic coefficients).
+                PauliCycleSum diff(const std::string& name) const {
+                        std::vector<PauliCycle<Coeff>> terms;
+                        terms.reserve(data.size());
+                        for (const auto& c : data) terms.push_back(c.diff(name));
+                        return PauliCycleSum(std::move(terms));
+                }
+
+                /// The sum with values substituted for symbols; summands that become zero are dropped.
+                PauliCycleSum substitute(const pauliengine_detail::SymbolValues& values) const {
+                        std::vector<PauliCycle<Coeff>> terms;
+                        terms.reserve(data.size());
+                        for (const auto& c : data) terms.push_back(c.substitute(values));
+                        return PauliCycleSum(std::move(terms));
+                }
+
                 /// Coefficient of `target`'s orbit in [this, other], without building
                 /// the full commutator.
                 template <typename C>

@@ -226,7 +226,7 @@ class PauliString {
                         this->coeff = input.first;
                         std::vector<std::pair<char, int>> paulis = input.second;
                         uint64_t mask = 0;
-                        for (int i = 0; i < paulis.size(); i++) {
+                        for (size_t i = 0; i < paulis.size(); i++) {
                                 get_symplectic_form(paulis[i].second, mask, std::string(1, paulis[i].first));
 
                         }

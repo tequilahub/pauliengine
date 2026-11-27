@@ -56,6 +56,23 @@ class PauliOrbitSum {
                 /// Drop terms whose coefficient is zero.
                 void prune_zeros();
 
+                /// Derivative of every coefficient by the symbol `name`; terms whose
+                /// derivative is zero are dropped (symbolic coefficients).
+                PauliOrbitSum diff(const std::string& name) const {
+                        PauliOrbitSum out = *this;
+                        for (auto& c : out.coeffs) c = pauliengine_detail::coeff_diff(c, name);
+                        out.prune_zeros();
+                        return out;
+                }
+
+                /// The sum with values substituted for symbols; terms that become zero are dropped.
+                PauliOrbitSum substitute(const pauliengine_detail::SymbolValues& values) const {
+                        PauliOrbitSum out = *this;
+                        for (auto& c : out.coeffs) c = pauliengine_detail::coeff_subs(c, values);
+                        out.prune_zeros();
+                        return out;
+                }
+
                 /// Commutator [this, other] = sum_{i,j} a_i b_j [B_i, B_j].
                 PauliOrbitSum commutator(const PauliOrbitSum& other) const;
 

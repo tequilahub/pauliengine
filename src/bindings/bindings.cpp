@@ -897,6 +897,18 @@ NB_MODULE(_core, m) {
         bind_scale_ops<OSS>(cls_oss,
                 "The sum with every coefficient scaled by an int, float or complex number; scaling by 0 gives the empty sum.");
 
+        // Derivative and substitution of symbolic cycles and orbit sums, as for Pauli strings.
+        cls_cys_sym.def("diff", &CYS::diff, nb::arg("symbol"), "Derivative of the coefficient with respect to the named symbol.")
+                   .def("subs", &CYS::substitute, nb::arg("values"), "Substitute values for symbols, given as {name: complex value}.");
+        cls_css.def("diff", &CSS::diff, nb::arg("symbol"),
+                    "Derivative of every coefficient with respect to the named symbol; summands that become zero are dropped.")
+               .def("subs", &CSS::substitute, nb::arg("values"),
+                    "Substitute values for symbols, given as {name: complex value}; summands that become zero are dropped.");
+        cls_oss.def("diff", &OSS::diff, nb::arg("symbol"),
+                    "Derivative of every coefficient with respect to the named symbol; terms that become zero are dropped.")
+               .def("subs", &OSS::substitute, nb::arg("values"),
+                    "Substitute values for symbols, given as {name: complex value}; terms that become zero are dropped.");
+
         // Pauli decomposition of a matrix (PauliDecomposition.h).
         cls_qhc.def_static("from_matrix",
                 [](nb::ndarray<const std::complex<double>, nb::ndim<2>, nb::c_contig, nb::device::cpu> m,

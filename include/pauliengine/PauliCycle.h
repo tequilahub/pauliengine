@@ -320,6 +320,20 @@ class PauliCycle {
                 /// The cycle with its coefficient multiplied by `scale`.
                 PauliCycle operator*(int scale) const { return *this * static_cast<double>(scale); }
 
+                /// Derivative of the coefficient by the symbol `name` (symbolic coefficients).
+                PauliCycle diff(const std::string& name) const {
+                        PauliCycle out = *this;
+                        out.Base.coeff = pauliengine_detail::coeff_diff(Base.coeff, name);
+                        return out;
+                }
+
+                /// The cycle with values substituted for symbols of its coefficient.
+                PauliCycle substitute(const pauliengine_detail::SymbolValues& values) const {
+                        PauliCycle out = *this;
+                        out.Base.coeff = pauliengine_detail::coeff_subs(Base.coeff, values);
+                        return out;
+                }
+
                 /// The cycle with its coefficient multiplied by a complex `scale`.
                 PauliCycle operator*(std::complex<double> scale) const {
                         PauliCycle out = *this;
