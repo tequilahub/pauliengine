@@ -19,7 +19,7 @@ cycle and orbit bases.
 
    import pauliengine as pe
 
-   H = pe.QubitHamiltonian([pe.PauliString(1.0, {0: "Z", 1: "X"}),
+   H = pe.PauliStringSum([pe.PauliString(1.0, {0: "Z", 1: "X"}),
                             pe.PauliString("a", {1: "X"})])
    print(H.commutator(H.dagger()))
 

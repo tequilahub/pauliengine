@@ -44,12 +44,12 @@ def anticommute(s1: str, s2: str) -> bool:
 
 
 def reference_hamiltonian(base: str, coeff: complex = 1.0):
-    """Build the full QubitHamiltonian: coeff * sum of all rotations of base."""
+    """Build the full PauliStringSum: coeff * sum of all rotations of base."""
     terms = []
     for s in cycle_strings(base):
         ops = {i: ch for i, ch in enumerate(s) if ch != "I"}
         terms.append(pe.PauliString(complex(coeff), ops))
-    return pe.QubitHamiltonian(terms)
+    return pe.PauliStringSum(terms)
 
 
 # Bases chosen so that all n rotations are distinct (no cyclic sub-period).
@@ -114,21 +114,21 @@ class TestCoefficients:
         pc = pe.PauliCycle(4, ps)
         assert pc.base.coeff == complex(1.5, -0.5)
 
-    def test_to_qubit_hamiltonian_scales_with_coefficient(self):
+    def test_to_pauli_string_sum_scales_with_coefficient(self):
         base = "XYZI"
         n = len(base)
         pc = pe.PauliCycle(n, base, complex(2.0, 0.0))
-        assert pc.to_qubit_hamiltonian() == reference_hamiltonian(base, 2.0)
+        assert pc.to_pauli_string_sum() == reference_hamiltonian(base, 2.0)
 
 
-# to_qubit_hamiltonian()
+# to_pauli_string_sum()
 
 
-class TestToQubitHamiltonian:
+class TestToPauliStringSum:
     @pytest.mark.parametrize("base", DISTINCT_BASES)
     def test_equals_manual_sum_of_rotations(self, base):
         pc = pe.PauliCycle(len(base), base)
-        assert pc.to_qubit_hamiltonian() == reference_hamiltonian(base)
+        assert pc.to_pauli_string_sum() == reference_hamiltonian(base)
 
 
 # commutator()  -- the main property
@@ -152,7 +152,7 @@ class TestCommutator:
         b = pe.PauliCycle(n, base_b)
 
         reference = reference_hamiltonian(base_a).commutator(reference_hamiltonian(base_b))
-        candidate = a.commutator(b).to_qubit_hamiltonian()
+        candidate = a.commutator(b).to_pauli_string_sum()
 
         assert candidate == reference
         assert len(reference - candidate) == 0
@@ -168,7 +168,7 @@ class TestCommutator:
         reference = reference_hamiltonian(base_a, alpha).commutator(
             reference_hamiltonian(base_b, beta)
         )
-        candidate = a.commutator(b).to_qubit_hamiltonian()
+        candidate = a.commutator(b).to_pauli_string_sum()
         assert candidate == reference
 
     def test_self_commutator_is_zero(self):
@@ -176,12 +176,12 @@ class TestCommutator:
         n = len(base)
         pc = pe.PauliCycle(n, base)
         h = reference_hamiltonian(base)
-        assert pc.commutator(pc).to_qubit_hamiltonian() == h.commutator(h)
+        assert pc.commutator(pc).to_pauli_string_sum() == h.commutator(h)
 
     def test_commuting_cycles_give_zero(self):
         a = pe.PauliCycle(4, "ZIZI")
         b = pe.PauliCycle(4, "ZZII")
-        result = a.commutator(b).to_qubit_hamiltonian()
+        result = a.commutator(b).to_pauli_string_sum()
         assert len(result) == 0
 
 
@@ -231,7 +231,7 @@ class TestPauliCycleSum:
         # Each cycle carries its own coefficient; there is no separate prefactor.
         s = pe.PauliCycleSum([pe.PauliCycle(3, "XII", 2.0)])
         assert not hasattr(s, "coeff")
-        assert s.to_qubit_hamiltonian() == reference_hamiltonian("XII", 2.0)
+        assert s.to_pauli_string_sum() == reference_hamiltonian("XII", 2.0)
 
     def test_contains_matches_rotation_orbit(self):
         n = 4
@@ -259,7 +259,7 @@ class TestMultiply:
         a = pe.PauliCycle(n, base_a)
         b = pe.PauliCycle(n, base_b)
         reference = reference_hamiltonian(base_a) * reference_hamiltonian(base_b)
-        assert (a * b).to_qubit_hamiltonian() == reference
+        assert (a * b).to_pauli_string_sum() == reference
 
     def test_matches_with_coefficients(self):
         base_a, base_b = "XYZI", "ZIXI"
@@ -268,7 +268,7 @@ class TestMultiply:
         a = pe.PauliCycle(n, base_a, alpha)
         b = pe.PauliCycle(n, base_b, beta)
         reference = reference_hamiltonian(base_a, alpha) * reference_hamiltonian(base_b, beta)
-        assert (a * b).to_qubit_hamiltonian() == reference
+        assert (a * b).to_pauli_string_sum() == reference
 
     def test_result_is_deduplicated_with_merged_coeffs(self):
         # "XII" * "XII" on n=3: two of the three products fall into the same
@@ -282,7 +282,7 @@ class TestMultiply:
         assert len(s.data) == 2  # collapsed from 3
         assert sorted(round(c.base.coeff.real, 3) for c in s.data) == [1.0, 2.0]
         # The operator content is unchanged by the merge.
-        assert s.to_qubit_hamiltonian() == a.to_qubit_hamiltonian() * a.to_qubit_hamiltonian()
+        assert s.to_pauli_string_sum() == a.to_pauli_string_sum() * a.to_pauli_string_sum()
 
 
 # Sum-level algebra: quadratic combination of every cycle with every cycle
@@ -296,15 +296,15 @@ class TestCycleSumAlgebra:
         n = 4
         s1 = self._sum(n, ["XYZI", "ZIXI"])
         s2 = self._sum(n, ["XXYZ", "IZYX"])
-        h1, h2 = s1.to_qubit_hamiltonian(), s2.to_qubit_hamiltonian()
-        assert s1.commutator(s2).to_qubit_hamiltonian() == h1.commutator(h2)
+        h1, h2 = s1.to_pauli_string_sum(), s2.to_pauli_string_sum()
+        assert s1.commutator(s2).to_pauli_string_sum() == h1.commutator(h2)
 
     def test_multiply_matches_expanded(self):
         n = 4
         s1 = self._sum(n, ["XYZI", "ZIXI"])
         s2 = self._sum(n, ["XXYZ", "IZYX"])
-        h1, h2 = s1.to_qubit_hamiltonian(), s2.to_qubit_hamiltonian()
-        assert (s1 * s2).to_qubit_hamiltonian() == h1 * h2
+        h1, h2 = s1.to_pauli_string_sum(), s2.to_pauli_string_sum()
+        assert (s1 * s2).to_pauli_string_sum() == h1 * h2
 
 
 # Scaling by an int or float keeps the type and scales the coefficients
@@ -318,7 +318,7 @@ class TestScale:
             assert isinstance(scaled, type(c))
             assert scaled == c
             assert scaled.base.coeff == 2.0 * scale
-            assert scaled.to_qubit_hamiltonian() == c.to_qubit_hamiltonian() * float(scale)
+            assert scaled.to_pauli_string_sum() == c.to_pauli_string_sum() * float(scale)
 
     @pytest.mark.parametrize("scale", [3, 0.5])
     def test_cycle_sum(self, scale):
@@ -326,7 +326,7 @@ class TestScale:
         for scaled in (s * scale, scale * s):
             assert isinstance(scaled, type(s))
             assert len(scaled) == len(s)
-            assert scaled.to_qubit_hamiltonian() == s.to_qubit_hamiltonian() * float(scale)
+            assert scaled.to_pauli_string_sum() == s.to_pauli_string_sum() * float(scale)
 
     def test_zero_gives_empty_sum(self):
         s = pe.PauliCycleSum([pe.PauliCycle(4, "XYZI")])
@@ -449,7 +449,7 @@ class TestSumMerging:
         for i in range(len(s.data)):
             for j in range(i + 1, len(s.data)):
                 assert s.data[i] != s.data[j]
-        assert s.to_qubit_hamiltonian() == reference_hamiltonian("XIII").commutator(
+        assert s.to_pauli_string_sum() == reference_hamiltonian("XIII").commutator(
             reference_hamiltonian("ZIZI")
         )
 
@@ -477,10 +477,10 @@ class TestSumMerging:
 
 class TestPeriodicBases:
     def test_periodic_cycle_counts_multiplicity(self):
-        assert pe.PauliCycle(3, "ZZZ").to_qubit_hamiltonian() == pe.QubitHamiltonian(
+        assert pe.PauliCycle(3, "ZZZ").to_pauli_string_sum() == pe.PauliStringSum(
             [pe.PauliString(3.0, {0: "Z", 1: "Z", 2: "Z"})]
         )
-        assert pe.PauliCycle(4, "XIXI").to_qubit_hamiltonian() == reference_hamiltonian("XIXI")
+        assert pe.PauliCycle(4, "XIXI").to_pauli_string_sum() == reference_hamiltonian("XIXI")
 
     @pytest.mark.parametrize(
         "base_a, base_b",
@@ -490,8 +490,8 @@ class TestPeriodicBases:
         n = len(base_a)
         a, b = pe.PauliCycle(n, base_a), pe.PauliCycle(n, base_b)
         ha, hb = reference_hamiltonian(base_a), reference_hamiltonian(base_b)
-        assert a.commutator(b).to_qubit_hamiltonian() == ha.commutator(hb)
-        assert (a * b).to_qubit_hamiltonian() == ha * hb
+        assert a.commutator(b).to_pauli_string_sum() == ha.commutator(hb)
+        assert (a * b).to_pauli_string_sum() == ha * hb
 
     def test_targeted_on_periodic(self):
         a, b = pe.PauliCycle(4, "XIII"), pe.PauliCycle(4, "ZIZI")
@@ -533,7 +533,7 @@ class TestHash:
         assert back.n_qubits == n
         assert back.base.coeff == 2.5 - 1j
         assert back.get_hash() == c.get_hash()
-        assert back.to_qubit_hamiltonian() == c.to_qubit_hamiltonian()
+        assert back.to_pauli_string_sum() == c.to_pauli_string_sum()
 
     def test_from_hash_base_is_unified(self):
         c = pe.PauliCycle(8, "IIYIIXIZ")
@@ -558,9 +558,9 @@ class TestSumUnify:
     def test_unify_rewrites_bases_and_keeps_operator(self):
         a, b = pe.PauliCycle(8, "XIZIIYII"), pe.PauliCycle(8, "IZZIIIXI")
         for s in (a.commutator(b), a * b):
-            before = s.to_qubit_hamiltonian()
+            before = s.to_pauli_string_sum()
             s.unify()
-            assert s.to_qubit_hamiltonian() == before
+            assert s.to_pauli_string_sum() == before
             for c in s.data:
                 u = pe.PauliCycle(8, c.base)
                 u.unify()

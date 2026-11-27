@@ -17,6 +17,10 @@
 /// - Every other combination expands both operands with as_hamiltonian() and
 ///   returns a QubitHamiltonian. Its coefficients are symbolic as soon as one
 ///   operand is symbolic, otherwise complex.
+/// - As soon as one operand is a SparsePauliString or SparsePauliStringSum, the
+///   result is sparse too: two strings give a SparsePauliString, everything else a
+///   SparsePauliStringSum (cycles and orbits are expanded into sparse strings).
+///   Inner products with cycles and orbits keep their own algorithms.
 /// - An unweighted string or set next to a weighted operator is upgraded first,
 ///   with coefficient 1.0 times its phase i^k (see the end of this header). Two
 ///   unweighted operands stay unweighted.
@@ -36,6 +40,7 @@
 #include "pauliengine/PauliCycle.h"
 #include "pauliengine/PauliOrbit.h"
 #include "pauliengine/UnweightedQubitHamiltonian.h"
+#include "pauliengine/SparsePauliStringSum.h"
 
 // ---------------------------------------------------------------------------
 // Conversion of every representation to a QubitHamiltonian
@@ -68,6 +73,18 @@ QubitHamiltonian<C> as_hamiltonian(const PauliCycleSum<C>& s) {
 /// An orbit expanded into all of its Pauli strings (see PauliOrbit::to_qubit_hamiltonian).
 inline QubitHamiltonian<std::complex<double>> as_hamiltonian(const PauliOrbit& o) {
         return o.to_qubit_hamiltonian();
+}
+
+/// A sparse Pauli string as a one-term Hamiltonian with bit vectors.
+template <typename C>
+QubitHamiltonian<C> as_hamiltonian(const SparsePauliString<C>& ps) {
+        return QubitHamiltonian<C>(std::vector<PauliString<C>>{ps.to_dense()});
+}
+
+/// A sparse Hamiltonian with bit vectors.
+template <typename C>
+QubitHamiltonian<C> as_hamiltonian(const SparsePauliStringSum<C>& h) {
+        return h.to_dense();
 }
 
 /// An orbit sum expanded into all Pauli strings of all its orbits.
@@ -120,6 +137,18 @@ template <typename T> inline constexpr bool is_pauli_string = false;
 template <typename C> inline constexpr bool is_pauli_string<PauliString<C>> = true;
 template <typename T> inline constexpr bool is_hamiltonian = false;
 template <typename C> inline constexpr bool is_hamiltonian<QubitHamiltonian<C>> = true;
+template <typename T> inline constexpr bool is_sparse_string = false;
+template <typename C> inline constexpr bool is_sparse_string<SparsePauliString<C>> = true;
+template <typename T> inline constexpr bool is_sparse_hamiltonian = false;
+template <typename C> inline constexpr bool is_sparse_hamiltonian<SparsePauliStringSum<C>> = true;
+template <typename T> inline constexpr bool is_sparse = is_sparse_string<T> || is_sparse_hamiltonian<T>;
+/// Pauli strings and sums of them, with bit vectors or sparse.
+template <typename T> inline constexpr bool is_string_family =
+        is_pauli_string<T> || is_hamiltonian<T> || is_sparse<T>;
+template <typename T> inline constexpr bool is_string_like = is_pauli_string<T> || is_sparse_string<T>;
+/// A sparse operator with a sparse one or with a Pauli string or Hamiltonian.
+template <typename A, typename B> inline constexpr bool sparse_string_pair =
+        (is_sparse<A> || is_sparse<B>) && is_string_family<A> && is_string_family<B>;
 template <typename T> inline constexpr bool is_cycle_family = false;
 template <typename C> inline constexpr bool is_cycle_family<PauliCycle<C>> = true;
 template <typename C> inline constexpr bool is_cycle_family<PauliCycleSum<C>> = true;
@@ -129,12 +158,18 @@ template <typename C> inline constexpr bool is_orbit_family<PauliOrbitSum<C>> = 
 
 template <typename A, typename B> inline constexpr bool cycle_pair = is_cycle_family<A> && is_cycle_family<B>;
 template <typename A, typename B> inline constexpr bool orbit_pair = is_orbit_family<A> && is_orbit_family<B>;
+/// A sparse operator with any weighted operator: the result is sparse. Cycles and
+/// orbits are expanded into sparse strings for this.
+template <typename A, typename B> inline constexpr bool sparse_pair =
+        (is_sparse<A> || is_sparse<B>)
+        && (is_string_family<A> || is_cycle_family<A> || is_orbit_family<A>)
+        && (is_string_family<B> || is_cycle_family<B> || is_orbit_family<B>);
 template <typename A, typename B> inline constexpr bool same_hamiltonian =
         is_hamiltonian<A> && std::is_same_v<A, B>;
 
 /// Pairs whose `+` / `-` is defined natively (class members or the family operators below).
 template <typename A, typename B> inline constexpr bool native_add =
-        cycle_pair<A, B> || orbit_pair<A, B> || same_hamiltonian<A, B>;
+        cycle_pair<A, B> || orbit_pair<A, B> || same_hamiltonian<A, B> || sparse_pair<A, B>;
 /// Pairs whose `*` is defined natively.
 template <typename A, typename B> inline constexpr bool native_mul =
         native_add<A, B> || (is_pauli_string<A> && is_pauli_string<B>);
@@ -276,6 +311,92 @@ auto operator*(const A& a, const B& b) {
 // Mixed operators: expand both sides and return a QubitHamiltonian
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Sparse operators with sparse ones, Pauli strings and Hamiltonians: stay sparse
+// ---------------------------------------------------------------------------
+
+namespace pauliengine_detail {
+
+/// A string-like operator as a SparsePauliString with coefficients of type `To`.
+template <typename To, typename T>
+SparsePauliString<To> as_sparse_string(const T& a) {
+        if constexpr (is_sparse_string<T>) {
+                if constexpr (std::is_same_v<To, hamiltonian_coeff_t<T>>) {
+                        return a;
+                } else {
+                        SparsePauliString<To> out(To(a.coeff));
+                        out.sites = a.sites;
+                        return out;
+                }
+        } else {
+                std::vector<Site> sites;
+                sites_of_words(a.x.data(), a.y.data(), std::min(a.x.size(), a.y.size()), sites);
+                SparsePauliString<To> out(To(a.coeff));
+                out.sites = std::move(sites);
+                return out;
+        }
+}
+
+/// Any operator of the string family as a SparsePauliStringSum with coefficients of type `To`.
+template <typename To, typename T>
+SparsePauliStringSum<To> as_sparse(const T& a) {
+        if constexpr (is_sparse_hamiltonian<T>) {
+                if constexpr (std::is_same_v<To, hamiltonian_coeff_t<T>>) {
+                        return a;
+                } else {
+                        SparseTerms<To> terms;
+                        terms.start = a.terms().start;
+                        terms.sites = a.terms().sites;
+                        terms.coeffs.reserve(a.size());
+                        for (const auto& c : a.terms().coeffs) terms.coeffs.push_back(To(c));
+                        return SparsePauliStringSum<To>::from_terms(std::move(terms));
+                }
+        } else if constexpr (is_string_like<T>) {
+                return SparsePauliStringSum<To>(std::vector<SparsePauliString<To>>{as_sparse_string<To>(a)});
+        } else if constexpr (is_hamiltonian<T>) {
+                std::vector<SparsePauliString<To>> terms;
+                for (const auto& ps : a.paulistrings()) terms.push_back(as_sparse_string<To>(ps));
+                return SparsePauliStringSum<To>(terms);
+        } else {
+                // cycles and orbits: their Pauli strings, one by one
+                return as_sparse<To>(as_hamiltonian(a));
+        }
+}
+
+}  // namespace pauliengine_detail
+
+/// a + b with a sparse operand, as a SparsePauliStringSum.
+template <typename A, typename B>
+        requires(pauliengine_detail::sparse_pair<A, B>)
+auto operator+(const A& a, const B& b) {
+        using namespace pauliengine_detail;
+        using R = promoted_coeff_t<A, B>;
+        return as_sparse<R>(a) + as_sparse<R>(b);
+}
+
+/// a - b with a sparse operand, as a SparsePauliStringSum.
+template <typename A, typename B>
+        requires(pauliengine_detail::sparse_pair<A, B>)
+auto operator-(const A& a, const B& b) {
+        using namespace pauliengine_detail;
+        using R = promoted_coeff_t<A, B>;
+        return as_sparse<R>(a) - as_sparse<R>(b);
+}
+
+/// a * b with a sparse operand: a SparsePauliString for two strings, otherwise a
+/// SparsePauliStringSum.
+template <typename A, typename B>
+        requires(pauliengine_detail::sparse_pair<A, B> && !std::is_same_v<A, B>)
+auto operator*(const A& a, const B& b) {
+        using namespace pauliengine_detail;
+        using R = promoted_coeff_t<A, B>;
+        if constexpr (is_string_like<A> && is_string_like<B>) {
+                return as_sparse_string<R>(a) * as_sparse_string<R>(b);
+        } else {
+                return as_sparse<R>(a) * as_sparse<R>(b);
+        }
+}
+
 /// a + b for operators of different kinds, as a QubitHamiltonian.
 template <typename A, typename B>
         requires(OperatorLike<A> && OperatorLike<B> && !pauliengine_detail::native_add<A, B>)
@@ -314,6 +435,12 @@ auto commutator(const A& a, const B& b) {
         using R = promoted_coeff_t<A, B>;
         if constexpr (std::is_same_v<A, B> && requires { a.commutator(b); }) {
                 return a.commutator(b);
+        } else if constexpr (sparse_pair<A, B>) {
+                if constexpr (is_string_like<A> && is_string_like<B>) {
+                        return as_sparse_string<R>(a).commutator(as_sparse_string<R>(b));
+                } else {
+                        return as_sparse<R>(a).commutator(as_sparse<R>(b));
+                }
         } else if constexpr (is_pauli_string<A> && is_pauli_string<B>) {
                 // complex and symbolic: a single string, like their product
                 return PauliString<R>(a.x, a.y, R(a.coeff)).commutator(PauliString<R>(b.x, b.y, R(b.coeff)));
@@ -474,7 +601,9 @@ template <typename A, typename B>
 pauliengine_detail::inner_t<A, B> inner_product(const A& a, const B& b) {
         using namespace pauliengine_detail;
         using R = inner_t<A, B>;
-        if constexpr (orbit_pair<A, B>) {
+        if constexpr (sparse_string_pair<A, B>) {
+                return R(as_sparse<R>(a).inner_product(as_sparse<R>(b)));
+        } else if constexpr (orbit_pair<A, B>) {
                 return orbit_family_inner<R>(as_orbit_sum<hamiltonian_coeff_t<A>>(a), as_orbit_sum<hamiltonian_coeff_t<B>>(b));
         } else if constexpr (is_orbit_family<A>) {
                 return orbit_sum_inner<R, true>(as_orbit_sum<hamiltonian_coeff_t<A>>(a), lift<B, A>(b));
@@ -661,4 +790,21 @@ inline PauliString<SymEngine::Expression> scaled_by(const unweighted_pauliString
 
 inline QubitHamiltonian<SymEngine::Expression> scaled_by(const unweighted_QubitHamiltonian& h, const SymEngine::Expression& e) {
         return h.to_qubit_hamiltonian(e);
+}
+
+template <typename C>
+SparsePauliString<SymEngine::Expression> scaled_by(const SparsePauliString<C>& a, const SymEngine::Expression& e) {
+        SparsePauliString<SymEngine::Expression> out(SymEngine::Expression(a.coeff) * e);
+        out.sites = a.sites;
+        return out;
+}
+
+template <typename C>
+SparsePauliStringSum<SymEngine::Expression> scaled_by(const SparsePauliStringSum<C>& h, const SymEngine::Expression& e) {
+        pauliengine_detail::SparseTerms<SymEngine::Expression> terms;
+        for (size_t i = 0; i < h.size(); ++i) {
+                const SymEngine::Expression c = SymEngine::Expression(h.terms().coeffs[i]) * e;
+                if (!pauliengine_detail::coeff_is_zero(c)) terms.push_back(h.terms().sites_of(i), h.terms().weight_of(i), c);
+        }
+        return SparsePauliStringSum<SymEngine::Expression>::from_terms(std::move(terms));
 }

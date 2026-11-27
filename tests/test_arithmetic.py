@@ -1,9 +1,9 @@
 """Arithmetic between all operator representations (include/pauliengine/Arithmetic.h).
 
-Every combination of PauliString, QubitHamiltonian, PauliCycle, PauliCycleSum,
+Every combination of PauliString, PauliStringSum, PauliCycle, PauliCycleSum,
 PauliOrbit and PauliOrbitSum must give the same operator as expanding both
-operands into QubitHamiltonians first. Within the cycle and orbit families the
-result stays compressed; everything else becomes a QubitHamiltonian.
+operands into PauliStringSums first. Within the cycle and orbit families the
+result stays compressed; everything else becomes a PauliStringSum.
 """
 
 import itertools
@@ -24,7 +24,7 @@ def make_operands():
     os_.add(pe.PauliOrbit(N, 0, 0, 2), -0.5j)
     return {
         "PauliString": pe.PauliString(0.5 + 0.25j, {0: "X", 2: "Z"}),
-        "QubitHamiltonian": pe.QubitHamiltonian(
+        "PauliStringSum": pe.PauliStringSum(
             [pe.PauliString(1.0, {1: "Y"}), pe.PauliString(-0.3j, {0: "Z", 3: "X"})]
         ),
         "PauliCycle": pe.PauliCycle(N, "XYII", 1.5),
@@ -35,11 +35,11 @@ def make_operands():
 
 
 def to_qh(x):
-    """Any operator (or result) as a QubitHamiltonian."""
-    if hasattr(x, "to_qubit_hamiltonian"):
-        return x.to_qubit_hamiltonian()
+    """Any operator (or result) as a PauliStringSum."""
+    if hasattr(x, "to_pauli_string_sum"):
+        return x.to_pauli_string_sum()
     if isinstance(x, (_core.PauliStringComplex, _core.PauliStringSymbolic)):
-        return pe.QubitHamiltonian([x])
+        return pe.PauliStringSum([x])
     return x
 
 
@@ -82,7 +82,7 @@ def test_result_types(left, right):
         elif left == right == "PauliString" and op in ("*", "commutator"):
             assert isinstance(got, _core.PauliStringComplex), op
         else:
-            assert isinstance(got, _core.QubitHamiltonianComplex), op
+            assert isinstance(got, _core.PauliStringSumComplex), op
 
 
 class TestSymbolic:
@@ -103,7 +103,7 @@ class TestSymbolic:
         num = pe.PauliString(2.0, {0: "X", 2: "Z"})
         b = ops[other]
         for got, expected in ((OPS[op](sym, b), OPS[op](num, b)), (OPS[op](b, sym), OPS[op](b, num))):
-            assert isinstance(got, _core.QubitHamiltonianSymbolic)
+            assert isinstance(got, _core.PauliStringSumSymbolic)
             values = self.as_numeric(got.subs({"a": 2.0}))
             ref = {tuple(sorted(o.items())): complex(c) for c, o in to_qh(expected).to_dictionary()}
             assert values.keys() == ref.keys()
@@ -111,11 +111,11 @@ class TestSymbolic:
                 assert values[k] == pytest.approx(ref[k], abs=1e-12)
 
     def test_symbolic_and_complex_hamiltonians(self):
-        hs = pe.QubitHamiltonian([("a", {0: "X"})])
-        hc = pe.QubitHamiltonian([(1.0, {0: "Y"})])
-        assert isinstance(hs + hc, _core.QubitHamiltonianSymbolic)
-        assert isinstance(hc * hs, _core.QubitHamiltonianSymbolic)
-        assert isinstance(hc.commutator(hs), _core.QubitHamiltonianSymbolic)
+        hs = pe.PauliStringSum([("a", {0: "X"})])
+        hc = pe.PauliStringSum([(1.0, {0: "Y"})])
+        assert isinstance(hs + hc, _core.PauliStringSumSymbolic)
+        assert isinstance(hc * hs, _core.PauliStringSumSymbolic)
+        assert isinstance(hc.commutator(hs), _core.PauliStringSumSymbolic)
 
 
 class TestFamilies:
@@ -141,24 +141,24 @@ class TestFamilies:
     def test_mixed_families_with_different_sizes(self):
         # no size constraint across kinds: both are simply operators
         h = pe.PauliCycle(3, "XII") + pe.PauliOrbit(5, 1, 0, 0)
-        assert_same_operator(h, pe.PauliCycle(3, "XII").to_qubit_hamiltonian()
-                             + pe.PauliOrbit(5, 1, 0, 0).to_qubit_hamiltonian())
+        assert_same_operator(h, pe.PauliCycle(3, "XII").to_pauli_string_sum()
+                             + pe.PauliOrbit(5, 1, 0, 0).to_pauli_string_sum())
 
 
 class TestOrbitExpansion:
     def test_normalization(self):
-        h = pe.PauliOrbit(4, 1, 1, 0).to_qubit_hamiltonian()
+        h = pe.PauliOrbit(4, 1, 1, 0).to_pauli_string_sum()
         assert len(h) == 12
         assert all(complex(c) == pytest.approx(1j / 12) for c, _ in h.to_dictionary())
 
     def test_identity_orbit(self):
-        h = pe.PauliOrbit(3, 0, 0, 0).to_qubit_hamiltonian()
+        h = pe.PauliOrbit(3, 0, 0, 0).to_pauli_string_sum()
         assert len(h) == 1
 
     def test_too_large_expansion_raises(self):
         big = pe.PauliOrbit(170, 4, 4, 4)
         with pytest.raises((ValueError, RuntimeError)):
-            big.to_qubit_hamiltonian()
+            big.to_pauli_string_sum()
         with pytest.raises((ValueError, RuntimeError)):
             big + pe.PauliString(1.0, {0: "X"})
 
@@ -181,22 +181,22 @@ class TestConsistentTypes:
     ])
     def test_complex_scaling_and_negation(self, make):
         op = make()
-        expected = op.to_qubit_hamiltonian() * 2j
-        assert (op * 2j).to_qubit_hamiltonian() == expected
-        assert (2j * op).to_qubit_hamiltonian() == expected
-        assert (-op).to_qubit_hamiltonian() == op.to_qubit_hamiltonian() * -1
+        expected = op.to_pauli_string_sum() * 2j
+        assert (op * 2j).to_pauli_string_sum() == expected
+        assert (2j * op).to_pauli_string_sum() == expected
+        assert (-op).to_pauli_string_sum() == op.to_pauli_string_sum() * -1
 
     def test_equality_across_coefficient_types(self):
         x = pe.PauliString(1.0, {0: "X"})
         xs = _core.PauliStringSymbolic(_core.Expression("1"), {0: "X"})
         assert x == xs and xs == x and hash(x) == hash(xs)
         assert x != xs * 2
-        assert pe.QubitHamiltonian([x]) == _core.QubitHamiltonianSymbolic([xs])
+        assert pe.PauliStringSum([x]) == _core.PauliStringSumSymbolic([xs])
         assert type(x == x) is bool
 
     def test_equality_with_other_objects_is_false(self):
         x = pe.PauliString(1.0, {0: "X"})
-        for other in (1, "X", None, pe.QubitHamiltonian([x]), pe.PauliOrbit(4, 1, 0, 0)):
+        for other in (1, "X", None, pe.PauliStringSum([x]), pe.PauliOrbit(4, 1, 0, 0)):
             assert not (x == other)
             assert x != other
 
@@ -213,25 +213,25 @@ class TestConsistentTypes:
 
 ALL_KINDS = [
     lambda: pe.PauliString(1.5, {0: "X", 1: "Z"}),
-    lambda: pe.QubitHamiltonian([pe.PauliString(1.5, {0: "X"}), pe.PauliString(0.5, {1: "Y"})]),
+    lambda: pe.PauliStringSum([pe.PauliString(1.5, {0: "X"}), pe.PauliString(0.5, {1: "Y"})]),
     lambda: pe.PauliCycle(4, "XZII", 0.5),
     lambda: pe.PauliCycleSum([pe.PauliCycle(4, "XIII", 0.5), pe.PauliCycle(4, "YZII", 2.0)]),
     lambda: pe.PauliOrbit(4, 1, 0, 1),
     lambda: pe.PauliOrbitSum(4, [(pe.PauliOrbit(4, 1, 0, 1), 0.5)]),
     lambda: _core.unweighted_pauliString("XZ"),
-    lambda: _core.unweighted_QubitHamiltonian([_core.unweighted_pauliString("XZ"), _core.unweighted_pauliString("YI")]),
+    lambda: _core.unweighted_PauliStringSum([_core.unweighted_pauliString("XZ"), _core.unweighted_pauliString("YI")]),
 ]
 
 
 def expanded(op):
-    """The operator as a QubitHamiltonian, symbolic ones evaluated at b = 0.7."""
-    if isinstance(op, (_core.unweighted_pauliString, _core.unweighted_QubitHamiltonian)):
+    """The operator as a PauliStringSum, symbolic ones evaluated at b = 0.7."""
+    if isinstance(op, (_core.unweighted_pauliString, _core.unweighted_PauliStringSum)):
         op = op * 1.0
-    if not isinstance(op, (_core.QubitHamiltonianComplex, _core.QubitHamiltonianSymbolic)):
-        op = op.to_qubit_hamiltonian() if hasattr(op, "to_qubit_hamiltonian") else pe.QubitHamiltonian([op])
-    if isinstance(op, _core.QubitHamiltonianSymbolic):
+    if not isinstance(op, (_core.PauliStringSumComplex, _core.PauliStringSumSymbolic)):
+        op = op.to_pauli_string_sum() if hasattr(op, "to_pauli_string_sum") else pe.PauliStringSum([op])
+    if isinstance(op, _core.PauliStringSumSymbolic):
         op = op.subs({"b": 0.7})
-        op = pe.QubitHamiltonian([pe.PauliString(_core.PauliStringSymbolic.to_complex(c), d) for c, d in op.to_dictionary()])
+        op = pe.PauliStringSum([pe.PauliString(_core.PauliStringSymbolic.to_complex(c), d) for c, d in op.to_dictionary()])
     return op
 
 
@@ -254,7 +254,7 @@ class TestScalars:
         assert expanded(b * op) == expanded(op) * 0.7
 
     def test_symbolic_scale_by_zero_drops_terms(self):
-        h = pe.QubitHamiltonian([pe.PauliString(1.0, {0: "X"})])
+        h = pe.PauliStringSum([pe.PauliString(1.0, {0: "X"})])
         assert len(h * _core.Expression("0")) == 0
 
 
@@ -262,11 +262,11 @@ class TestUnweightedCompletions:
     def test_inner_product_between_unweighted_operators(self):
         s = _core.unweighted_pauliString("XZ")
         t = _core.unweighted_pauliString("YI")
-        h = _core.unweighted_QubitHamiltonian([s, t])
+        h = _core.unweighted_PauliStringSum([s, t])
         for a, b in itertools.product((s, t, h), repeat=2):
             assert a.inner_product(b) == pytest.approx(expanded(a).inner_product(expanded(b)))
 
     def test_negated_set(self):
-        h = _core.unweighted_QubitHamiltonian([_core.unweighted_pauliString("XZ"), _core.unweighted_pauliString("YI")])
-        assert isinstance(-h, _core.unweighted_QubitHamiltonian)
+        h = _core.unweighted_PauliStringSum([_core.unweighted_pauliString("XZ"), _core.unweighted_pauliString("YI")])
+        assert isinstance(-h, _core.unweighted_PauliStringSum)
         assert expanded(-h) == expanded(h) * -1

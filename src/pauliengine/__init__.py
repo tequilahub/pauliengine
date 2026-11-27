@@ -11,13 +11,14 @@ from ._version import __version__
 from .pauli_cycle import PauliCycle, PauliCycleSum
 from .pauli_orbit import PauliOrbit, PauliOrbitSum
 from .pauli_string import PauliString
-from .qubit_hamiltonian import QubitHamiltonian, from_openfermion
+from .pauli_string_sum import PauliStringSum, QubitHamiltonian, from_openfermion
+from .sparse import get_sparse_threshold, set_sparse_threshold
 
 
 def inner_product(a, b):
     """Normalized Hilbert-Schmidt inner product Tr(a^dagger b) / 2**n.
 
-    Works for any two of PauliString, QubitHamiltonian, PauliCycle, PauliCycleSum,
+    Works for any two of PauliString, PauliStringSum, PauliCycle, PauliCycleSum,
     PauliOrbit and PauliOrbitSum; Pauli strings are orthonormal. Conjugate-linear
     in ``a``. Multiply by 2**n for the unnormalized trace on n qubits.
     """
@@ -29,6 +30,7 @@ __all__ = [
     "PauliOrbit",
     "PauliOrbitSum",
     "PauliString",
+    "PauliStringSum",
     "QubitHamiltonian",
     "__build_type__",
     "__compiler_flags__",
@@ -37,5 +39,7 @@ __all__ = [
     "__openmp__",
     "__version__",
     "from_openfermion",
+    "get_sparse_threshold",
     "inner_product",
+    "set_sparse_threshold",
 ]

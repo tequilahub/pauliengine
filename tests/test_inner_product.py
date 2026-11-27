@@ -99,7 +99,7 @@ class TestPaperFormulas:
 
 def test_linearity_in_second_argument():
     ops = make_operands()
-    a, b, c = ops["PauliCycle"], ops["QubitHamiltonian"], ops["PauliOrbitSum"]
+    a, b, c = ops["PauliCycle"], ops["PauliStringSum"], ops["PauliOrbitSum"]
     lhs = complex(a.inner_product(b + c))
     assert lhs == pytest.approx(complex(a.inner_product(b)) + complex(a.inner_product(c)), abs=1e-12)
 
@@ -110,5 +110,5 @@ def test_symbolic():
     v = c.inner_product(s)
     assert isinstance(v, _core.Expression)
     num = complex(_core.PauliStringSymbolic.to_complex(
-        pe.QubitHamiltonian([pe.PauliString(str(v), {0: "X"})]).subs({"a": 3.0}).to_dictionary()[0][0]))
+        pe.PauliStringSum([pe.PauliString(str(v), {0: "X"})]).subs({"a": 3.0}).to_dictionary()[0][0]))
     assert num == pytest.approx(complex(c.inner_product(pe.PauliString(3.0, {0: "X", 2: "Z"}))))

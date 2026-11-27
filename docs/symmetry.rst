@@ -29,7 +29,7 @@ rotation several times (the cycle of ``ZZZ`` on three qubits is ``3 * ZZZ``).
 
    s = a.commutator(b)            # PauliCycleSum, O(n / 64) for bounded weight
    p = a * b                      # product, also a PauliCycleSum
-   s.to_qubit_hamiltonian()       # expand into an explicit QubitHamiltonian
+   s.to_pauli_string_sum()        # expand into an explicit PauliStringSum
 
 Two cycles are equal if they describe the same rotation orbit; the coefficient
 is ignored. ``unify()`` rewrites the stored base to the unified representative
@@ -54,7 +54,7 @@ X-, ``q`` Y- and ``r`` Z-sites,
    \qquad N_\text{terms} = \frac{n!}{p!\,q!\,r!\,(n-p-q-r)!} ,
 
 as in the paper. ``n_terms()`` returns :math:`N_\text{terms}`, and
-``to_qubit_hamiltonian()`` writes the orbit out (only feasible for small orbits):
+``to_pauli_string_sum()`` writes the orbit out (only feasible for small orbits):
 
 .. code-block:: python
 
@@ -105,7 +105,7 @@ consistent with ``==``:
 Arithmetic between representations
 ----------------------------------
 
-All representations (``PauliString``, ``QubitHamiltonian``, ``PauliCycle``,
+All representations (``PauliString``, ``PauliStringSum``, ``PauliCycle``,
 ``PauliCycleSum``, ``PauliOrbit``, ``PauliOrbitSum``) can be combined with
 ``+``, ``-``, ``*`` and ``commutator``:
 
@@ -117,14 +117,14 @@ All representations (``PauliString``, ``QubitHamiltonian``, ``PauliCycle``,
 
    c + c.commutator(c)        # PauliCycleSum: stays in the cycle family
    o * o                      # PauliOrbitSum: stays in the orbit family
-   c * o                      # QubitHamiltonian
-   p.commutator(o)            # QubitHamiltonian
+   c * o                      # PauliStringSum
+   p.commutator(o)            # PauliStringSum
 
 Within the cycle family and within the orbit family the result stays
 compressed. A product or commutator of two Pauli strings stays a Pauli string,
 and two Hamiltonians with the same coefficient type use their own operators.
 Every other combination expands both operands and returns a
-``QubitHamiltonian``; it is symbolic as soon as one operand is symbolic.
+``PauliStringSum``; it is symbolic as soon as one operand is symbolic.
 An ``int`` or ``float`` on either side scales the coefficients and keeps the
 family: ``2 * c`` is a ``PauliCycle``, a scaled ``PauliCycleSum`` or
 ``PauliOrbitSum`` keeps its type, and ``2 * o`` is a ``PauliOrbitSum``, since an

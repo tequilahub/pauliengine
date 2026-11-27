@@ -13,6 +13,32 @@ Pauli decomposition of matrices.
 
 ### Added
 
+- **Sparse Pauli strings and Hamiltonians** for low-weight operators on many qubits:
+  `SparsePauliStringComplex`/`Symbolic` and `SparsePauliStringSumComplex`/`Symbolic`
+  store only the non-identity sites (4 bytes each) instead of bit vectors up to the
+  highest qubit, so products and commutators cost O(weight) per pair of terms instead of
+  O(n / 64). Products and squares add up equal operators in hash buckets on all threads,
+  with results that do not depend on the number of threads; commutators visit only pairs
+  that share a qubit; targeted commutators, `contains` and inner products join on the
+  operator hash. The full Pauli string and Hamiltonian API is available (methods without
+  a sparse algorithm, such as `to_matrix`, go through `to_dense()`).
+  `pe.PauliString` and `pe.PauliStringSum` build them automatically when an operator
+  spans at least 256 qubits and every one of its strings is at most 1/256 of the span
+  long (whatever the form of the input, including existing sums and OpenFermion
+  operators); `pe.set_sparse_threshold` / `pe.get_sparse_threshold` change this. A sparse
+  operand keeps the result of `+`, `-` and scaling sparse with every other operator,
+  including cycles, orbits (expanded into sparse strings) and unweighted ones, unless the
+  other operand has bit vectors and does not fit the rule. Products and commutators
+  (also `square` and `**`) always come back as `PauliString` / `PauliStringSum` with
+  bit vectors; two sparse operands are still multiplied with the sparse kernels.
+  Every Python constructor that takes Pauli strings also takes sparse ones (sums from
+  lists in any mix, `PauliCycle(n, base)`, `unweighted_pauliString(s)`,
+  `unweighted_PauliStringSum(h)`). Sparse and bit-vector classes have the same methods
+  (`square`, `anticommutes`, `from_hash`, `from_matrix` and `to_complex` now exist on
+  both sides; only `to_dense`, `fits_sparse` and `sites` are sparse-only), and
+  `isinstance(x, pe.PauliString)` / `isinstance(x, pe.PauliStringSum)` accept every
+  weighted string or sum, complex or symbolic, sparse or not.
+  C++: `SparsePauliString<Coeff>`, `SparsePauliStringSum<Coeff>`.
 - `diff(symbol)` and `subs({name: value})` for `PauliCycleSymbolic`, `PauliCycleSumSymbolic`
   and `PauliOrbitSumSymbolic`, as for Pauli strings and Hamiltonians; terms of a sum that become
   zero are dropped.
@@ -116,6 +142,13 @@ Pauli decomposition of matrices.
 
 ### Changed
 
+- **`QubitHamiltonian` is now `PauliStringSum` in Python**: the factory
+  `pe.PauliStringSum`, the classes `PauliStringSumComplex` / `PauliStringSumSymbolic`,
+  `unweighted_PauliStringSum`, the method `to_pauli_string_sum()` of cycles, orbits and
+  unweighted sets, and the module `pauliengine.pauli_string_sum`. The old names
+  (`pe.QubitHamiltonian`, `QubitHamiltonianComplex`, `to_qubit_hamiltonian()`,
+  `pauliengine.qubit_hamiltonian`, ...) remain as aliases. The C++ class is still
+  `QubitHamiltonian<Coeff>`.
 - The commutator of a complex and a symbolic Pauli string is a symbolic `PauliString`, like
   their product, instead of a `QubitHamiltonianSymbolic`.
 - `==` never raises: complex and symbolic Pauli strings and Hamiltonians compare by value,

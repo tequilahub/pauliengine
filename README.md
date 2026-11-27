@@ -8,8 +8,14 @@
 # PauliEngine — Fast Arithmetic for Quantum Operators
 
 A C++ core with a nanobind Python frontend for working with Pauli strings and
-qubit Hamiltonians. Coefficients can be numeric (`std::complex<double>`) or
+their sums (qubit Hamiltonians). Coefficients can be numeric (`std::complex<double>`) or
 fully symbolic (SymEngine).
+
+> **Naming.** In Python a sum of Pauli strings is a `PauliStringSum`
+> (`PauliStringSumComplex`, `PauliStringSumSymbolic`, ...). The old names
+> `QubitHamiltonian`, `QubitHamiltonianComplex`, `to_qubit_hamiltonian()` etc. remain
+> as aliases, so existing code keeps working. In C++ the class is still
+> `QubitHamiltonian<Coeff>`.
 
 See [arXiv:2601.02233](https://arxiv.org/abs/2601.02233) for the algorithmic
 background.
@@ -27,14 +33,14 @@ background.
   (`SymEngine::Expression`); cross-type arithmetic is handled automatically and
   type-promotes the way you expect (any symbolic term → the whole Hamiltonian
   becomes symbolic).
-- **Compaction invariant** — every operation that returns a `QubitHamiltonian`
+- **Compaction invariant** — every operation that returns a `PauliStringSum`
   merges duplicate-operator terms and drops zero-coefficient terms. You never
   need to call `simplify()` for correctness.
 - **Tequila-compatible API** — `qubits`, `n_qubits`, `is_hermitian`,
   `is_antihermitian`, `dagger`, `conjugate`, `transpose`, `simplify(threshold)`,
   `split`, `map_qubits`, `power` / `__pow__`, `to_matrix`, `paulistrings`,
   `count_measurements`, `is_all_z`.
-- **OpenFermion bridge** — the `QubitHamiltonian` factory accepts an
+- **OpenFermion bridge** — the `PauliStringSum` factory accepts an
   `openfermion.QubitOperator` directly; `to_openfermion` and `from_openfermion`
   helpers are available.
 
@@ -55,7 +61,7 @@ p2 = pe.PauliString("a", {1: "X"})
 p3 = pe.PauliString((1.0, [("X", 0), ("Y", 2)]))
 
 # Build a Hamiltonian from a list of PauliStrings (or (coeff, dict) tuples).
-H = pe.QubitHamiltonian([p1, p2, p3])
+H = pe.PauliStringSum([p1, p2, p3])
 
 print(H.qubits())        # [0, 1, 2]
 print(H.is_hermitian())  # True
@@ -81,14 +87,14 @@ pe.PauliString((1.0, [("X", 0), ("Y", 2)]))   # OpenFermion-style (coeff, list)
 pe.PauliString("a", {0: "X"})                 # symbolic coefficient
 ```
 
-`pe.QubitHamiltonian` accepts:
+`pe.PauliStringSum` accepts:
 
 ```python
-pe.QubitHamiltonian([ps1, ps2, ...])                       # list of PauliStrings
-pe.QubitHamiltonian([(1.0, {0: "X"}), ("a", {1: "Z"})])    # list of tuples
-pe.QubitHamiltonian(openfermion_qubit_operator)            # see OpenFermion bridge
-pe.QubitHamiltonian.zero()                                 # empty Hamiltonian
-pe.QubitHamiltonian.unit()                                 # identity (single term, coeff 1, no ops)
+pe.PauliStringSum([ps1, ps2, ...])                       # list of PauliStrings
+pe.PauliStringSum([(1.0, {0: "X"}), ("a", {1: "Z"})])    # list of tuples
+pe.PauliStringSum(openfermion_qubit_operator)            # see OpenFermion bridge
+pe.PauliStringSum.zero()                                 # empty Hamiltonian
+pe.PauliStringSum.unit()                                 # identity (single term, coeff 1, no ops)
 ```
 
 If any term in the list is symbolic, the resulting Hamiltonian is symbolic.
@@ -102,7 +108,7 @@ If any term in the list is symbolic, the resulting Hamiltonian is symbolic.
 p4 = pe.PauliString(1.0, {0: "X"}) * pe.PauliString(1.0, {0: "Y"})  # -> 1j * Z(0)
 
 # Scalar multiplication on both sides; +, -, unary -, and addition between
-# PauliStrings (returns a QubitHamiltonian).
+# PauliStrings (returns a PauliStringSum).
 H1 = p1 + p2 - p3
 H2 = 0.5 * H1 + (-H1) * 2j
 H3 = H1 ** 3                  # integer powers
@@ -172,7 +178,7 @@ symbolic. Symbolic PauliStrings and Hamiltonians support every arithmetic
 operation plus:
 
 ```python
-H = pe.QubitHamiltonian([("a", {0: "X"}), ("b", {1: "Z"})])
+H = pe.PauliStringSum([("a", {0: "X"}), ("b", {1: "Z"})])
 
 dH = H.diff("a")            # symbolic derivative
 H2 = H.subs({"a": 2.0})     # substitute and evaluate
@@ -184,17 +190,65 @@ needed.
 
 ---
 
+## Sparse operators for many qubits
+
+`PauliString` and `PauliStringSum` store every string as bit vectors up to the
+highest qubit, so a term of weight 2 on qubit 4000 takes 126 words and every
+product walks all of them. For low-weight strings on many qubits the factories
+build sparse classes instead, which store only the non-identity sites and cost
+O(weight) per product or commutator:
+
+```python
+H = pe.PauliStringSum([(1.0, {j: "Z", j + 1: "Z"}) for j in range(4095)])
+G = pe.PauliStringSum([(0.5, {j: "X"}) for j in range(4096)])
+target = pe.PauliString(1.0, {0: "Y", 1: "Z"})
+type(H)   # SparsePauliStringSumComplex
+H + G; H.targeted_commutator(G, target)    # same API, stays sparse
+H.commutator(G); H * H                     # PauliStringSumComplex (bit vectors)
+H.to_dense()                               # PauliStringSumComplex
+```
+
+- An operator is sparse when it spans at least 256 qubits (highest index + 1)
+  and every one of its strings is at most 1/256 of that span long (weight 2 from
+  512 qubits on, weight 4 from 1024); one heavy string keeps the whole sum with
+  bit vectors. Only the content decides: tuples, strings with bit vectors, sparse
+  strings, an existing sum or an OpenFermion operator give the same type.
+  `pe.set_sparse_threshold(min_qubits=..., max_density=...)` changes this;
+  `min_qubits=float("inf")` turns it off.
+- Products and commutators (also `square` and `**`) always come back as
+  `PauliStringSum` / `PauliString` with bit vectors, since they make strings
+  heavier. Of two sparse operands (or a sparse one next to a cycle or orbit) the
+  sparse kernels compute the result, which is converted at the end; next to a
+  Pauli string or Hamiltonian with bit vectors the sparse operand is converted
+  first.
+- Sums, differences and scaling keep a sparse operand sparse, with every other
+  operator: Pauli strings and Hamiltonians are converted, cycles and orbits
+  expanded into sparse strings, unweighted strings and sets count with
+  coefficient `i**phase`. Next to an operator with bit vectors that does not fit
+  the rule, the sum is formed with bit vectors (`fits_sparse()` tells which side
+  of the rule an operator is on). Inner
+  products with cycles and orbits keep their own algorithms (orbits are never
+  expanded).
+- Sparse and bit-vector operators compare equal when they describe the same
+  operator, and sparse strings hash like their bit-vector counterparts.
+- Both have the same methods (sparse ones add `to_dense()`, `fits_sparse()` and,
+  for strings, `sites`), and `isinstance(x, pe.PauliString)` /
+  `isinstance(x, pe.PauliStringSum)` accept either, so code does not need to know
+  which one the factory chose.
+
+---
+
 ## Unweighted Pauli strings (Lie algebras only)
 
 `pe.PauliString` without a coefficient gives an unweighted string that keeps only
-the phase `i**k`, and `pe.QubitHamiltonian` of such strings is an ordered set of
+the phase `i**k`, and `pe.PauliStringSum` of such strings is an ordered set of
 operators. **Use them only as basis elements of a Lie algebra**, for example to
 compute the dynamical Lie algebra of a set of generators. For linear combinations
 use weighted strings and Hamiltonians.
 
 ```python
 generators = [pe.PauliString(w, phase=1) for w in ("ZI", "IZ", "XX")]   # i * P
-basis = pe.QubitHamiltonian(generators)
+basis = pe.PauliStringSum(generators)
 while True:
     size = len(basis)
     basis += basis.commutator(basis)
@@ -212,7 +266,7 @@ len(basis)   # dimension of the Lie algebra
   is anti-Hermitian, as in a real Lie algebra such as su(2^n).
 - `==` compares operator and phase, but `hash` only the operator, so a Python
   `set` keeps `i * Z` and `-i * Z` apart. Collect a basis in a
-  `pe.QubitHamiltonian` instead.
+  `pe.PauliStringSum` instead.
 - Next to a weighted operator, or times a number, an unweighted string counts
   with coefficient `1.0 * i**k` and the result is weighted.
 
@@ -225,11 +279,11 @@ from openfermion import QubitOperator
 qop = 1.5 * QubitOperator("X0 Y1") + 0.5j * QubitOperator("Z2")
 
 # Factory accepts QubitOperator directly:
-H = pe.QubitHamiltonian(qop)
+H = pe.PauliStringSum(qop)
 
 # Or use the explicit helpers:
 H = pe.from_openfermion(qop)
-qop_back = pe.QubitHamiltonian.to_openfermion(H)
+qop_back = pe.PauliStringSum.to_openfermion(H)
 assert qop == qop_back
 ```
 
@@ -242,9 +296,10 @@ message if it is missing.
 ## C++ usage
 
 The library is a header-only template under `include/pauliengine/`. Both
-`PauliString<Coeff>` and `QubitHamiltonian<Coeff>` work for
+`PauliString<Coeff>` and `QubitHamiltonian<Coeff>` (Python: `PauliStringSum`) work for
 `Coeff = std::complex<double>` and `Coeff = SymEngine::Expression`. Every
-operation exposed in Python is available in C++ with the same name. A
+operation exposed in Python is available in C++ with the same name (except
+`to_pauli_string_sum`, which is `to_qubit_hamiltonian` in C++). A
 `QubitHamiltonian` with complex coefficients stores its terms as flat arrays;
 `terms()` returns them as Pauli strings, `term(i)` a single one.
 

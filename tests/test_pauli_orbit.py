@@ -1,7 +1,7 @@
 """Tests for PauliOrbit / PauliOrbitSum (permutation-invariant basis).
 
 The commutator is verified against the ground-truth operator algebra: each orbit
-B_{p,q,r} is expanded into an explicit QubitHamiltonian (i / N_terms times the sum
+B_{p,q,r} is expanded into an explicit PauliStringSum (i / N_terms times the sum
 of all placements of p X's, q Y's and r Z's), the two Hamiltonians are commuted,
 and the result must match the expansion of ``PauliOrbit.commutator``
 (arXiv:2604.16701, Theorem 1 / Prop. 7). A tolerance-based comparison is used
@@ -20,7 +20,7 @@ import pauliengine as pe
 
 
 def orbit_to_qh(n: int, p: int, q: int, r: int):
-    """B_{p,q,r} as an explicit QubitHamiltonian: (i / N_terms) * sum of strings."""
+    """B_{p,q,r} as an explicit PauliStringSum: (i / N_terms) * sum of strings."""
     letters = ["X"] * p + ["Y"] * q + ["Z"] * r + ["I"] * (n - p - q - r)
     perms = set(permutations(letters))
     n_terms = len(perms)
@@ -28,19 +28,19 @@ def orbit_to_qh(n: int, p: int, q: int, r: int):
         pe.PauliString(1j / n_terms, {i: c for i, c in enumerate(perm) if c != "I"} or {0: "I"})
         for perm in perms
     ]
-    return pe.QubitHamiltonian(terms)
+    return pe.PauliStringSum(terms)
 
 
 def orbitsum_to_qh(s):
-    """Expand a PauliOrbitSum into a QubitHamiltonian."""
-    acc = pe.QubitHamiltonian.zero()
+    """Expand a PauliOrbitSum into a PauliStringSum."""
+    acc = pe.PauliStringSum.zero()
     for orbit, coeff in zip(s.data, s.coeffs):
         acc = acc + orbit_to_qh(s.n_qubits, orbit.p, orbit.q, orbit.r) * complex(coeff)
     return acc
 
 
 def qh_close(a, b, tol: float = 1e-9) -> bool:
-    """Coefficient-wise comparison of two QubitHamiltonians within a tolerance."""
+    """Coefficient-wise comparison of two PauliStringSums within a tolerance."""
 
     def as_dict(qh):
         return {tuple(sorted(ops.items())): complex(c) for c, ops in qh.to_dictionary()}

@@ -7,8 +7,16 @@ from ._core import (
     Expression,
     PauliStringComplex,
     PauliStringSymbolic,
+    SparsePauliStringComplex,
+    SparsePauliStringSymbolic,
     unweighted_pauliString,
 )
+from .sparse import span_and_weight, use_sparse
+
+_SPARSE_OF = {
+    PauliStringComplex: SparsePauliStringComplex,
+    PauliStringSymbolic: SparsePauliStringSymbolic,
+}
 
 
 _UNSET = object()
@@ -21,14 +29,23 @@ class PauliStringFactory:
     ``PauliStringSymbolic`` for a string coefficient and an
     ``unweighted_pauliString`` without a coefficient, and accepts several
     formats for the Pauli operators.
+
+    ``isinstance(x, PauliString)`` is true for every weighted Pauli string,
+    complex or symbolic, with bit vectors or sparse; an ``unweighted_pauliString``
+    has no coefficient and is not one.
     """
 
     __slots__ = ["_builders", "_name"]
+
+    _CLASSES = (PauliStringComplex, PauliStringSymbolic, SparsePauliStringComplex, SparsePauliStringSymbolic)
 
     def __init__(self, name: str, builders: dict[type, type]) -> None:
         """Create the factory; ``builders`` maps coefficient types to classes."""
         self._builders = builders
         self._name = name
+
+    def __instancecheck__(self, obj) -> bool:
+        return isinstance(obj, self._CLASSES)
 
     def _convert_terms(self, terms) -> dict[int, str] | str:
         """Convert various input formats into a text or an {index: 'Pauli'} dict."""
@@ -87,7 +104,9 @@ class PauliStringFactory:
 
         Returns:
             The Pauli string: ``PauliStringComplex``, ``PauliStringSymbolic`` or,
-            without a coefficient, ``unweighted_pauliString``.
+            without a coefficient, ``unweighted_pauliString``. A low-weight string
+            on many qubits is a ``SparsePauliStringComplex`` or
+            ``SparsePauliStringSymbolic`` instead (see ``set_sparse_threshold``).
 
         Raises:
             ValueError: If the coefficient type or the operator format is not
@@ -125,11 +144,16 @@ class PauliStringFactory:
         if builder == PauliStringSymbolic:
             coeff = Expression(coeff)
 
+        # Low-weight strings on many qubits: store only the sites (see sparse.py).
+        span, weight = span_and_weight(pauli_strings)
+        if use_sparse(span, weight):
+            return _SPARSE_OF[builder](coeff, pauli_strings)
         return builder(coeff, pauli_strings)
 
     def _unweighted_terms(self, terms):
         """The operators of an unweighted string, as its constructor takes them."""
-        if isinstance(terms, (str, dict, PauliStringComplex, PauliStringSymbolic)):
+        if isinstance(terms, (str, dict, PauliStringComplex, PauliStringSymbolic,
+                              SparsePauliStringComplex, SparsePauliStringSymbolic)):
             return terms
         if isinstance(terms, Iterable):
             return list(terms)

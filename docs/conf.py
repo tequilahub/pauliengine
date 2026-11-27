@@ -49,6 +49,8 @@ autodoc_default_options = {
     "undoc-members": True,
     "special-members": "__init__, __mul__, __add__, __sub__, __eq__, __hash__, __contains__, __len__",
     "show-inheritance": False,
+    # old name of to_pauli_string_sum, kept as an alias (see python_api.rst)
+    "exclude-members": "to_qubit_hamiltonian",
 }
 autodoc_member_order = "groupwise"
 autodoc_typehints = "description"

@@ -15,7 +15,7 @@ VALUES = {"a": complex(A), "b": complex(B)}
 
 def as_dict(qh, values=None):
     """{operator: coefficient} of a Hamiltonian; symbolic ones are evaluated first."""
-    if isinstance(qh, _core.QubitHamiltonianSymbolic):
+    if isinstance(qh, _core.PauliStringSumSymbolic):
         qh = qh.subs(values or VALUES)
         items = [(_core.PauliStringSymbolic.to_complex(c), ops) for c, ops in qh.to_dictionary()]
     else:
@@ -25,14 +25,14 @@ def as_dict(qh, values=None):
 
 def same_operator(sym, num):
     """sym (symbolic, any kind) evaluated at VALUES equals num (complex)."""
-    left = as_dict(sym.to_qubit_hamiltonian() if hasattr(sym, "to_qubit_hamiltonian") else sym)
-    right = as_dict(num.to_qubit_hamiltonian() if hasattr(num, "to_qubit_hamiltonian") else num)
+    left = as_dict(sym.to_pauli_string_sum() if hasattr(sym, "to_pauli_string_sum") else sym)
+    right = as_dict(num.to_pauli_string_sum() if hasattr(num, "to_pauli_string_sum") else num)
     return left.keys() == right.keys() and all(abs(left[k] - right[k]) < 1e-9 for k in left)
 
 
 def value(coeff):
     """A symbolic coefficient evaluated at VALUES."""
-    h = pe.QubitHamiltonian([pe.PauliString(str(coeff), {})]).subs(VALUES)
+    h = pe.PauliStringSum([pe.PauliString(str(coeff), {})]).subs(VALUES)
     terms = h.to_dictionary()
     return _core.PauliStringSymbolic.to_complex(terms[0][0]) if terms else 0j
 
@@ -116,8 +116,8 @@ class TestCycleAlgebra:
 
     def test_with_other_operators(self, cycles):
         (x, y), (xc, yc) = cycles
-        h = yc.to_qubit_hamiltonian()
-        assert isinstance(x * h, _core.QubitHamiltonianSymbolic)
+        h = yc.to_pauli_string_sum()
+        assert isinstance(x * h, _core.PauliStringSumSymbolic)
         assert same_operator(x * h, xc * h)
         assert same_operator(x + pe.PauliString(1.0, "XX"), xc + pe.PauliString(1.0, "XX"))
 
@@ -175,14 +175,14 @@ class TestOrbitSum:
     def test_inner_product(self, orbit_sums):
         sym, num = orbit_sums
         assert value(pe.inner_product(num, sym)) == pytest.approx(pe.inner_product(num, num))
-        h = num.to_qubit_hamiltonian()
+        h = num.to_pauli_string_sum()
         assert value(pe.inner_product(h, sym)) == pytest.approx(pe.inner_product(h, num))
         assert "conjugate(2.0 + a)" in str(pe.inner_product(sym, h))
 
     def test_with_cycles(self, orbit_sums, cycles):
         sym, num = orbit_sums
         (x, _), (xc, _) = cycles
-        assert isinstance(sym * x, _core.QubitHamiltonianSymbolic)
+        assert isinstance(sym * x, _core.PauliStringSumSymbolic)
         assert same_operator(sym * x, num * xc)
 
 
@@ -200,15 +200,15 @@ class TestDiffSubs:
     def test_diff_matches_expanded(self, index):
         op = self.operators()[index]
         for name in ("a", "b"):
-            assert as_dict(op.diff(name).to_qubit_hamiltonian()) == pytest.approx(
-                as_dict(op.to_qubit_hamiltonian().diff(name)))
+            assert as_dict(op.diff(name).to_pauli_string_sum()) == pytest.approx(
+                as_dict(op.to_pauli_string_sum().diff(name)))
 
     @pytest.mark.parametrize("index", range(3))
     def test_subs_matches_expanded(self, index):
         op = self.operators()[index]
         values = {"a": 0.5, "b": 2.0}
-        assert as_dict(op.subs(values).to_qubit_hamiltonian()) == pytest.approx(
-            as_dict(op.to_qubit_hamiltonian().subs(values)))
+        assert as_dict(op.subs(values).to_pauli_string_sum()) == pytest.approx(
+            as_dict(op.to_pauli_string_sum().subs(values)))
 
     def test_partial_subs_keeps_other_symbols(self):
         cy = self.operators()[0].subs({"a": 2})

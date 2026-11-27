@@ -69,7 +69,7 @@ def test_a_coefficient_gives_a_weighted_string():
 
 def test_only_one_public_class():
     assert not hasattr(pe, "unweighted_pauliString")
-    assert not hasattr(pe, "unweighted_QubitHamiltonian")
+    assert not hasattr(pe, "unweighted_PauliStringSum")
 
 
 def test_phase_needs_an_unweighted_string():
@@ -123,37 +123,37 @@ def test_scalars_and_weighted_factors_give_weighted_results():
 
 
 def test_hamiltonian_factory_recognizes_unweighted_strings():
-    h = pe.QubitHamiltonian([pe.PauliString("X"), pe.PauliString("Y")])
-    assert isinstance(h, _core.unweighted_QubitHamiltonian)
-    assert isinstance(pe.QubitHamiltonian(h), _core.unweighted_QubitHamiltonian)
-    assert pe.QubitHamiltonian(h) == h
-    assert isinstance(pe.QubitHamiltonian([pe.PauliString(1.0, "X")]), _core.QubitHamiltonianComplex)
+    h = pe.PauliStringSum([pe.PauliString("X"), pe.PauliString("Y")])
+    assert isinstance(h, _core.unweighted_PauliStringSum)
+    assert isinstance(pe.PauliStringSum(h), _core.unweighted_PauliStringSum)
+    assert pe.PauliStringSum(h) == h
+    assert isinstance(pe.PauliStringSum([pe.PauliString(1.0, "X")]), _core.PauliStringSumComplex)
 
 
 def test_unweighted_next_to_complex_terms_becomes_complex():
-    h = pe.QubitHamiltonian([pe.PauliString("X"), pe.PauliString(0.5, "Y"), pe.PauliString("Z", phase=1)])
-    assert isinstance(h, _core.QubitHamiltonianComplex)
-    assert h == pe.QubitHamiltonian([pe.PauliString(1.0, "X"), pe.PauliString(0.5, "Y"), pe.PauliString(1j, "Z")])
+    h = pe.PauliStringSum([pe.PauliString("X"), pe.PauliString(0.5, "Y"), pe.PauliString("Z", phase=1)])
+    assert isinstance(h, _core.PauliStringSumComplex)
+    assert h == pe.PauliStringSum([pe.PauliString(1.0, "X"), pe.PauliString(0.5, "Y"), pe.PauliString(1j, "Z")])
 
 
 def test_unweighted_next_to_symbolic_terms_becomes_symbolic():
-    h = pe.QubitHamiltonian([pe.PauliString("X"), pe.PauliString("a", "Y"), pe.PauliString("Z", phase=1)])
-    assert isinstance(h, _core.QubitHamiltonianSymbolic)
-    assert h == pe.QubitHamiltonian([pe.PauliString(1.0, "X"), pe.PauliString("a", "Y"), pe.PauliString(1j, "Z")])
+    h = pe.PauliStringSum([pe.PauliString("X"), pe.PauliString("a", "Y"), pe.PauliString("Z", phase=1)])
+    assert isinstance(h, _core.PauliStringSumSymbolic)
+    assert h == pe.PauliStringSum([pe.PauliString(1.0, "X"), pe.PauliString("a", "Y"), pe.PauliString(1j, "Z")])
 
 
 @pytest.mark.parametrize(
     ("term", "kind"),
-    [((0.5, {1: "Z"}), _core.QubitHamiltonianComplex), (("a", {1: "Z"}), _core.QubitHamiltonianSymbolic)],
+    [((0.5, {1: "Z"}), _core.PauliStringSumComplex), (("a", {1: "Z"}), _core.PauliStringSumSymbolic)],
 )
 def test_unweighted_next_to_tuples(term, kind):
-    assert isinstance(pe.QubitHamiltonian([pe.PauliString("X"), term]), kind)
-    assert isinstance(pe.QubitHamiltonian([term, pe.PauliString("X")]), kind)
+    assert isinstance(pe.PauliStringSum([pe.PauliString("X"), term]), kind)
+    assert isinstance(pe.PauliStringSum([term, pe.PauliString("X")]), kind)
 
 
 def test_unweighted_terms_merge_with_weighted_ones_as_a_sum():
-    h = pe.QubitHamiltonian([pe.PauliString("X"), pe.PauliString(2.0, "X"), pe.PauliString("Y", phase=2), pe.PauliString(1.0, "Y")])
-    assert h == pe.QubitHamiltonian([pe.PauliString(3.0, "X")])
+    h = pe.PauliStringSum([pe.PauliString("X"), pe.PauliString(2.0, "X"), pe.PauliString("Y", phase=2), pe.PauliString(1.0, "Y")])
+    assert h == pe.PauliStringSum([pe.PauliString(3.0, "X")])
 
 
 @pytest.mark.parametrize(
@@ -303,7 +303,7 @@ def test_to_pauli_string_enables_sums_and_commutators():
     a, b = pe.PauliString("X0"), pe.PauliString("Y0")
     commutator = a.to_pauli_string().commutator(b.to_pauli_string())
     assert commutator == pe.PauliString("Z0", phase=1).to_pauli_string(2.0)
-    hamiltonian = pe.QubitHamiltonian([a.to_pauli_string(0.5), b.to_pauli_string(0.25)])
+    hamiltonian = pe.PauliStringSum([a.to_pauli_string(0.5), b.to_pauli_string(0.25)])
     assert len(hamiltonian) == 2
 
 
@@ -380,13 +380,13 @@ def test_closure_of_anti_hermitian_generators_stays_anti_hermitian():
 
 
 def string_set(*terms):
-    return pe.QubitHamiltonian(
+    return pe.PauliStringSum(
         [pe.PauliString(t[0], phase=t[1]) if isinstance(t, tuple) else pe.PauliString(t) for t in terms]
     )
 
 
 def lie_closure(generators):
-    basis = pe.QubitHamiltonian(generators)
+    basis = pe.PauliStringSum(generators)
     while True:
         size = len(basis)
         basis += basis.commutator(basis)
@@ -424,7 +424,7 @@ def test_indices_are_stable_across_growth():
         if s.get_hash() not in seen:
             seen.add(s.get_hash())
             strings.append(s)
-    h = _core.unweighted_QubitHamiltonian()
+    h = _core.unweighted_PauliStringSum()
     for i, s in enumerate(strings):
         assert h.insert(s)
         assert h.index(s) == i
@@ -440,7 +440,7 @@ def test_lookup_and_errors():
     assert pe.PauliString("Y0") not in h
     assert pe.PauliString("X900") not in h
     assert pe.PauliString() not in h
-    assert pe.PauliString("X0") not in _core.unweighted_QubitHamiltonian()
+    assert pe.PauliString("X0") not in _core.unweighted_PauliStringSum()
     with pytest.raises(ValueError):
         h.index(pe.PauliString("Y0"))
     with pytest.raises(IndexError):
@@ -471,32 +471,32 @@ def test_product_and_commutator_match_the_strings(n_qubits):
     rng = random.Random(n_qubits)
     a_terms = [pe.PauliString(random_labels(rng, n_qubits), phase=rng.randrange(4)) for _ in range(30)]
     b_terms = [pe.PauliString(random_labels(rng, n_qubits // 2 + 1), phase=rng.randrange(4)) for _ in range(30)]
-    a, b = pe.QubitHamiltonian(a_terms), pe.QubitHamiltonian(b_terms)
+    a, b = pe.PauliStringSum(a_terms), pe.PauliStringSum(b_terms)
     expected_product, expected_commutator = [], []
     for s in a.terms():
         for t in b.terms():
             expected_product.append(s * t)
             if not s.commutes(t):
                 expected_commutator.append(s * t)
-    assert (a * b).terms() == pe.QubitHamiltonian(expected_product).terms()
-    assert a.commutator(b).terms() == pe.QubitHamiltonian(expected_commutator).terms()
+    assert (a * b).terms() == pe.PauliStringSum(expected_product).terms()
+    assert a.commutator(b).terms() == pe.PauliStringSum(expected_commutator).terms()
 
 
-def test_conversion_to_and_from_qubit_hamiltonian():
+def test_conversion_to_and_from_pauli_string_sum():
     h = string_set(("X0", 1), ("Y1", 2))
-    weighted = h.to_qubit_hamiltonian(0.5)
-    assert weighted == pe.QubitHamiltonian([pe.PauliString(0.5j, {0: "X"}), pe.PauliString(-0.5, {1: "Y"})])
-    assert _core.unweighted_QubitHamiltonian(weighted) == string_set("X0", "Y1")
-    symbolic = h.to_qubit_hamiltonian("a")
-    assert _core.unweighted_QubitHamiltonian(symbolic) == string_set("X0", "Y1")
+    weighted = h.to_pauli_string_sum(0.5)
+    assert weighted == pe.PauliStringSum([pe.PauliString(0.5j, {0: "X"}), pe.PauliString(-0.5, {1: "Y"})])
+    assert _core.unweighted_PauliStringSum(weighted) == string_set("X0", "Y1")
+    symbolic = h.to_pauli_string_sum("a")
+    assert _core.unweighted_PauliStringSum(symbolic) == string_set("X0", "Y1")
 
 
 def test_commutator_operators_match_the_weighted_hamiltonian():
     rng = random.Random(5)
-    a = pe.QubitHamiltonian([pe.PauliString(random_labels(rng, 6)) for _ in range(40)])
-    b = pe.QubitHamiltonian([pe.PauliString(random_labels(rng, 6)) for _ in range(40)])
+    a = pe.PauliStringSum([pe.PauliString(random_labels(rng, 6)) for _ in range(40)])
+    b = pe.PauliStringSum([pe.PauliString(random_labels(rng, 6)) for _ in range(40)])
     unweighted = a.commutator(b)
-    weighted = _core.unweighted_QubitHamiltonian(a.to_qubit_hamiltonian().commutator(b.to_qubit_hamiltonian()))
+    weighted = _core.unweighted_PauliStringSum(a.to_pauli_string_sum().commutator(b.to_pauli_string_sum()))
     # The weighted sum may cancel terms, a set of operators never does.
     assert all(t in unweighted for t in weighted)
 
@@ -519,9 +519,9 @@ def test_lie_closure_of_a_universal_set_is_su_2_to_the_n(n_qubits):
 
 
 def hamiltonians():
-    complex_h = pe.QubitHamiltonian([pe.PauliString(2.0, "XI"), pe.PauliString(0.5j, "ZZ")])
-    symbolic_h = pe.QubitHamiltonian([pe.PauliString("a", "XI"), pe.PauliString("b", "ZZ")])
-    return [(complex_h, _core.QubitHamiltonianComplex), (symbolic_h, _core.QubitHamiltonianSymbolic)]
+    complex_h = pe.PauliStringSum([pe.PauliString(2.0, "XI"), pe.PauliString(0.5j, "ZZ")])
+    symbolic_h = pe.PauliStringSum([pe.PauliString("a", "XI"), pe.PauliString("b", "ZZ")])
+    return [(complex_h, _core.PauliStringSumComplex), (symbolic_h, _core.PauliStringSumSymbolic)]
 
 
 @pytest.mark.parametrize("phase", range(4))
@@ -545,27 +545,27 @@ def test_unweighted_string_next_to_a_hamiltonian_counts_as_weighted(phase, index
 
 
 def test_commutator_of_a_string_and_a_hamiltonian_keeps_the_factor_2():
-    h = pe.QubitHamiltonian([pe.PauliString(1.0, "X")])
-    assert h.commutator(pe.PauliString("Y")) == pe.QubitHamiltonian([pe.PauliString(2j, "Z")])
+    h = pe.PauliStringSum([pe.PauliString(1.0, "X")])
+    assert h.commutator(pe.PauliString("Y")) == pe.PauliStringSum([pe.PauliString(2j, "Z")])
 
 
 def test_inner_product_and_lookup_next_to_a_hamiltonian():
-    h = pe.QubitHamiltonian([pe.PauliString(2.0, "X"), pe.PauliString(0.5j, "Z")])
+    h = pe.PauliStringSum([pe.PauliString(2.0, "X"), pe.PauliString(0.5j, "Z")])
     p = pe.PauliString("Z", phase=1)
     assert h.inner_product(p) == h.inner_product(pe.PauliString(1j, "Z"))
     assert p.inner_product(h) == pe.PauliString(1j, "Z").inner_product(h)
     assert h.contains(p) == 0.5j
     assert p in h
     assert pe.PauliString("Y") not in h
-    symbolic = pe.QubitHamiltonian([pe.PauliString("a", "X")])
+    symbolic = pe.PauliStringSum([pe.PauliString("a", "X")])
     assert pe.PauliString("X") in symbolic
     assert pe.PauliString("Y") not in symbolic
 
 
 def test_sum_cancels_next_to_a_hamiltonian():
-    h = pe.QubitHamiltonian([pe.PauliString(1.0, "X")])
+    h = pe.PauliStringSum([pe.PauliString(1.0, "X")])
     assert len(h - pe.PauliString("X")) == 0
-    assert (h + pe.PauliString("X")) == pe.QubitHamiltonian([pe.PauliString(2.0, "X")])
+    assert (h + pe.PauliString("X")) == pe.PauliStringSum([pe.PauliString(2.0, "X")])
 
 
 def test_two_unweighted_strings_have_no_sum():
@@ -582,8 +582,8 @@ def weighted_operands():
     return {
         "complex string": pe.PauliString(0.5 + 0.25j, "XZ"),
         "symbolic string": pe.PauliString("a", "XZ"),
-        "complex hamiltonian": pe.QubitHamiltonian([pe.PauliString(2.0, "XI"), pe.PauliString(0.5j, "ZZ")]),
-        "symbolic hamiltonian": pe.QubitHamiltonian([pe.PauliString("a", "XI"), pe.PauliString("b", "ZZ")]),
+        "complex hamiltonian": pe.PauliStringSum([pe.PauliString(2.0, "XI"), pe.PauliString(0.5j, "ZZ")]),
+        "symbolic hamiltonian": pe.PauliStringSum([pe.PauliString("a", "XI"), pe.PauliString("b", "ZZ")]),
         "cycle": pe.PauliCycle(2, "XY", 1.5),
         "cycle sum": cycle_sum,
         "orbit": pe.PauliOrbit(2, 1, 1, 0),
@@ -593,10 +593,10 @@ def weighted_operands():
 
 def unweighted_operands():
     s = pe.PauliString("YX", phase=1)
-    h = pe.QubitHamiltonian([pe.PauliString("ZI", phase=3), pe.PauliString("XY", phase=2)])
+    h = pe.PauliStringSum([pe.PauliString("ZI", phase=3), pe.PauliString("XY", phase=2)])
     return {
         "string": (s, s.to_pauli_string(1.0)),
-        "set": (h, h.to_qubit_hamiltonian(1.0)),
+        "set": (h, h.to_pauli_string_sum(1.0)),
     }
 
 
@@ -625,25 +625,25 @@ def test_unweighted_operand_counts_with_coefficient_one_times_its_phase(weighted
 
 
 def test_upgrade_uses_coefficient_one_times_the_phase():
-    h = pe.QubitHamiltonian([pe.PauliString("Z", phase=1)])
-    c = pe.QubitHamiltonian([pe.PauliString(2.0, "X")])
-    assert c + h == pe.QubitHamiltonian([pe.PauliString(2.0, "X"), pe.PauliString(1j, "Z")])
-    assert c * pe.PauliString("Z") == pe.QubitHamiltonian([pe.PauliString(-2j, "Y")])
+    h = pe.PauliStringSum([pe.PauliString("Z", phase=1)])
+    c = pe.PauliStringSum([pe.PauliString(2.0, "X")])
+    assert c + h == pe.PauliStringSum([pe.PauliString(2.0, "X"), pe.PauliString(1j, "Z")])
+    assert c * pe.PauliString("Z") == pe.PauliStringSum([pe.PauliString(-2j, "Y")])
 
 
 @pytest.mark.parametrize("scale", [2, -0.5, 1j])
 def test_set_times_a_number_is_a_weighted_hamiltonian(scale):
-    h = pe.QubitHamiltonian([pe.PauliString("Z", phase=1), pe.PauliString("X")])
-    expected = h.to_qubit_hamiltonian(complex(scale))
+    h = pe.PauliStringSum([pe.PauliString("Z", phase=1), pe.PauliString("X")])
+    expected = h.to_pauli_string_sum(complex(scale))
     for got in (h * scale, scale * h):
-        assert isinstance(got, _core.QubitHamiltonianComplex)
+        assert isinstance(got, _core.PauliStringSumComplex)
         assert got == expected
 
 
 def test_set_and_string_stay_unweighted():
     x, y, z = pe.PauliString("X"), pe.PauliString("Y"), pe.PauliString("Z")
-    h = pe.QubitHamiltonian([x, y])
-    assert isinstance(h + z, _core.unweighted_QubitHamiltonian)
+    h = pe.PauliStringSum([x, y])
+    assert isinstance(h + z, _core.unweighted_PauliStringSum)
     assert [t.to_string() for t in h + z] == [x.to_string(), y.to_string(), z.to_string()]
     assert [t.to_string() for t in z + h] == [z.to_string(), x.to_string(), y.to_string()]
     # the first phase seen for an operator wins

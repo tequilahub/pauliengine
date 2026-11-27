@@ -25,15 +25,15 @@ requires_openfermion = pytest.mark.skipif(
  
 
 def _complex_qh(*pauli_dicts_and_coeffs):
-    """Build a QubitHamiltonianComplex from (coeff, ops_dict) pairs."""
+    """Build a PauliStringSumComplex from (coeff, ops_dict) pairs."""
     ps_list = [pe.PauliString(complex(c), d) for c, d in pauli_dicts_and_coeffs]
-    return pe.QubitHamiltonian(ps_list)
+    return pe.PauliStringSum(ps_list)
 
 
 def _symbolic_qh(*pauli_dicts_and_coeffs):
-    """Build a QubitHamiltonianSymbolic from (str_coeff, ops_dict) pairs."""
+    """Build a PauliStringSumSymbolic from (str_coeff, ops_dict) pairs."""
     ps_list = [pe.PauliString(str(c), d) for c, d in pauli_dicts_and_coeffs]
-    return pe.QubitHamiltonian(ps_list)
+    return pe.PauliStringSum(ps_list)
 
 
 
@@ -41,38 +41,38 @@ def _symbolic_qh(*pauli_dicts_and_coeffs):
 class TestConstruction:
     def test_from_complex_pauli_strings(self):
         ps = pe.PauliString(1.0, {0: "X"})
-        qh = pe.QubitHamiltonian([ps])
-        assert isinstance(qh, _core.QubitHamiltonianComplex)
+        qh = pe.PauliStringSum([ps])
+        assert isinstance(qh, _core.PauliStringSumComplex)
 
     def test_from_symbolic_pauli_strings(self):
         ps = pe.PauliString("a", {0: "X"})
-        qh = pe.QubitHamiltonian([ps])
-        assert isinstance(qh, _core.QubitHamiltonianSymbolic)
+        qh = pe.PauliStringSum([ps])
+        assert isinstance(qh, _core.PauliStringSumSymbolic)
 
     def test_from_tuple_list_complex(self):
-        qh = pe.QubitHamiltonian([(1.0 + 0j, {0: "X"}), (2.0 + 0j, {1: "Z"})])
-        assert isinstance(qh, _core.QubitHamiltonianComplex)
+        qh = pe.PauliStringSum([(1.0 + 0j, {0: "X"}), (2.0 + 0j, {1: "Z"})])
+        assert isinstance(qh, _core.PauliStringSumComplex)
 
     def test_from_tuple_list_symbolic(self):
-        qh = pe.QubitHamiltonian([("a", {0: "X"}), ("b", {1: "Z"})])
-        assert isinstance(qh, _core.QubitHamiltonianSymbolic)
+        qh = pe.PauliStringSum([("a", {0: "X"}), ("b", {1: "Z"})])
+        assert isinstance(qh, _core.PauliStringSumSymbolic)
 
     def test_any_symbolic_pauli_string_gives_symbolic_hamiltonian(self):
         """If ANY PauliString in the list is symbolic the result must be symbolic."""
         ps_complex = pe.PauliString(1.0, {0: "X"})
         ps_symbolic = pe.PauliString("a", {0: "Z"})
-        qh = pe.QubitHamiltonian([ps_complex, ps_symbolic])
-        assert isinstance(qh, _core.QubitHamiltonianSymbolic)
+        qh = pe.PauliStringSum([ps_complex, ps_symbolic])
+        assert isinstance(qh, _core.PauliStringSumSymbolic)
 
     def test_multiple_pauli_strings_complex(self):
         ps_list = [pe.PauliString(float(i), {i: "Z"}) for i in range(1, 4)]
-        qh = pe.QubitHamiltonian(ps_list)
-        assert isinstance(qh, _core.QubitHamiltonianComplex)
+        qh = pe.PauliStringSum(ps_list)
+        assert isinstance(qh, _core.PauliStringSumComplex)
 
     def test_multiple_pauli_strings_symbolic(self):
         ps_list = [pe.PauliString(f"c{i}", {i: "Z"}) for i in range(3)]
-        qh = pe.QubitHamiltonian(ps_list)
-        assert isinstance(qh, _core.QubitHamiltonianSymbolic)
+        qh = pe.PauliStringSum(ps_list)
+        assert isinstance(qh, _core.PauliStringSumSymbolic)
 
 
 
@@ -124,13 +124,13 @@ class TestAddition:
         qh1 = _complex_qh((1.0, {0: "X"}))
         qh2 = _complex_qh((1.0, {1: "Z"}))
         result = qh1 + qh2
-        assert isinstance(result, _core.QubitHamiltonianComplex)
+        assert isinstance(result, _core.PauliStringSumComplex)
 
     def test_add_returns_correct_type_symbolic(self):
         qh1 = _symbolic_qh(("a", {0: "X"}))
         qh2 = _symbolic_qh(("b", {1: "Z"}))
         result = qh1 + qh2
-        assert isinstance(result, _core.QubitHamiltonianSymbolic)
+        assert isinstance(result, _core.PauliStringSumSymbolic)
 
     def test_add_cancelling_terms(self):
         qh1 = _complex_qh((1.0, {0: "X"}))
@@ -152,24 +152,24 @@ class TestScalarMultiplication:
         result = qh * (2j)
         expected = _complex_qh((0.0, {0: "X"}))  # coeff 2j
         # Just check type and that coeff changed — exact equality depends on QH == logic
-        assert isinstance(result, _core.QubitHamiltonianComplex)
+        assert isinstance(result, _core.PauliStringSumComplex)
         coeff_val = result.to_dictionary()[0][0]
         assert coeff_val == 2j
 
     def test_mul_symbolic_hamiltonian_complex_scalar(self):
         qh = _symbolic_qh(("a", {0: "X"}))
         result = qh * (2.0 + 0j)
-        assert isinstance(result, _core.QubitHamiltonianSymbolic)
+        assert isinstance(result, _core.PauliStringSumSymbolic)
 
     def test_mul_returns_same_type_complex(self):
         qh = _complex_qh((1.0, {0: "Z"}))
         result = qh * (3.0 + 0j)
-        assert isinstance(result, _core.QubitHamiltonianComplex)
+        assert isinstance(result, _core.PauliStringSumComplex)
 
     def test_mul_returns_same_type_symbolic(self):
         qh = _symbolic_qh(("a", {0: "Z"}))
         result = qh * (3.0 + 0j)
-        assert isinstance(result, _core.QubitHamiltonianSymbolic)
+        assert isinstance(result, _core.PauliStringSumSymbolic)
 
 
 class TestHamiltonianMultiplication:
@@ -179,7 +179,7 @@ class TestHamiltonianMultiplication:
         qh2 = _complex_qh((1.0, {0: "Z"}))
         result = qh1 * qh2
         expected_ps = pe.PauliString(1.0, {0: "X"}) * pe.PauliString(1.0, {0: "Z"})
-        expected = pe.QubitHamiltonian([expected_ps])
+        expected = pe.PauliStringSum([expected_ps])
         assert result == expected
 
     def test_mul_distributes(self):
@@ -189,7 +189,7 @@ class TestHamiltonianMultiplication:
         result = qh1 * qh2
         ps_xy = pe.PauliString(1.0, {0: "X"}) * pe.PauliString(1.0, {0: "Y"})
         ps_zy = pe.PauliString(1.0, {0: "Z"}) * pe.PauliString(1.0, {0: "Y"})
-        expected = pe.QubitHamiltonian([ps_xy, ps_zy])
+        expected = pe.PauliStringSum([ps_xy, ps_zy])
         assert result == expected
 
     def test_mul_result_count(self):
@@ -203,13 +203,13 @@ class TestHamiltonianMultiplication:
         qh1 = _symbolic_qh(("a", {0: "X"}))
         qh2 = _symbolic_qh(("b", {0: "Z"}))
         result = qh1 * qh2
-        assert isinstance(result, _core.QubitHamiltonianSymbolic)
+        assert isinstance(result, _core.PauliStringSumSymbolic)
 
     def test_mul_returns_same_type_complex(self):
         qh1 = _complex_qh((1.0, {0: "X"}))
         qh2 = _complex_qh((1.0, {1: "Z"}))
         result = qh1 * qh2
-        assert isinstance(result, _core.QubitHamiltonianComplex)
+        assert isinstance(result, _core.PauliStringSumComplex)
 
 class TestStringRepresentation:
     def test_to_string_returns_str(self):
@@ -263,13 +263,13 @@ class TestTraceOutQubits:
     def test_trace_out_returns_hamiltonian(self):
         qh = _complex_qh((1.0, {0: "Z", 1: "X"}))
         result = qh.trace_out_qubits([1], [0])
-        assert isinstance(result, _core.QubitHamiltonianComplex)
+        assert isinstance(result, _core.PauliStringSumComplex)
 
     def test_trace_out_identity_on_non_present_qubit(self):
         qh = _complex_qh((1.0, {0: "Z"}))
         result = qh.trace_out_qubits([5], [0])
         # qubit 5 is not present; tracing out a qubit that acts as I should preserve
-        assert isinstance(result, _core.QubitHamiltonianComplex)
+        assert isinstance(result, _core.PauliStringSumComplex)
 
     def test_trace_out_z_in_state_0(self):
         # Z|0><0| trace → eigenvalue +1 → coeff preserved
@@ -277,12 +277,12 @@ class TestTraceOutQubits:
         result = qh.trace_out_qubits([0], [0])
         d = result.to_dictionary()
         # Resulting terms may be zero or have coefficient based on trace semantics
-        assert isinstance(result, _core.QubitHamiltonianComplex)
+        assert isinstance(result, _core.PauliStringSumComplex)
 
 
 
 class TestCommutator:
-    """Algebraic properties of QubitHamiltonian.commutator.
+    """Algebraic properties of PauliStringSum.commutator.
 
     Exact single-qubit values are exercised by PauliString commutator tests.
     Here we only verify that QH dispatches correctly and respects the
@@ -291,17 +291,17 @@ class TestCommutator:
     def test_commutator_returns_same_type_complex(self):
         qh1 = _complex_qh((1.0, {0: "X"}))
         qh2 = _complex_qh((1.0, {0: "Z"}))
-        assert isinstance(qh1.commutator(qh2), _core.QubitHamiltonianComplex)
+        assert isinstance(qh1.commutator(qh2), _core.PauliStringSumComplex)
 
     def test_commutator_returns_same_type_symbolic(self):
         qh1 = _symbolic_qh(("a", {0: "X"}))
         qh2 = _symbolic_qh(("b", {0: "Z"}))
-        assert isinstance(qh1.commutator(qh2), _core.QubitHamiltonianSymbolic)
+        assert isinstance(qh1.commutator(qh2), _core.PauliStringSumSymbolic)
 
     def test_commutator_exact_sanity(self):
         """[2X, 3Z] = -12iY (covers exact dispatch + coefficient scaling)."""
         result = _complex_qh((2.0, {0: "X"})).commutator(_complex_qh((3.0, {0: "Z"})))
-        assert result == pe.QubitHamiltonian([pe.PauliString(-12j, {0: "Y"})])
+        assert result == pe.PauliStringSum([pe.PauliString(-12j, {0: "Y"})])
 
     def test_commutator_different_qubits_is_zero(self):
         """Operators on different qubits commute."""
@@ -330,8 +330,8 @@ class TestCommutator:
 
     def test_commutator_multiqubit_one_anticommuting_pair(self):
         """[X(0)Z(1), Z(0)] = -2i Y(0)Z(1)."""
-        qh_a = pe.QubitHamiltonian([pe.PauliString(1.0, {0: "X", 1: "Z"})])
-        qh_b = pe.QubitHamiltonian([pe.PauliString(1.0, {0: "Z"})])
+        qh_a = pe.PauliStringSum([pe.PauliString(1.0, {0: "X", 1: "Z"})])
+        qh_b = pe.PauliStringSum([pe.PauliString(1.0, {0: "Z"})])
         d = qh_a.commutator(qh_b).to_dictionary()
         assert len(d) == 1
         coeff, ops = d[0]
@@ -342,7 +342,7 @@ class TestCommutator:
         """[X(0)+Z(0), Y(0)] = 2iZ(0) - 2iX(0)."""
         qh1 = _complex_qh((1.0, {0: "X"}), (1.0, {0: "Z"}))
         qh2 = _complex_qh((1.0, {0: "Y"}))
-        expected = pe.QubitHamiltonian([
+        expected = pe.PauliStringSum([
             pe.PauliString(2j, {0: "Z"}),
             pe.PauliString(-2j, {0: "X"}),
         ])
@@ -364,21 +364,21 @@ class TestSubstitute:
     def test_subs_replaces_symbol_with_value(self):
         qh = _symbolic_qh(("a", {0: "X"}))
         result = qh.subs({"a": 2.0 + 0j})
-        assert isinstance(result, _core.QubitHamiltonianSymbolic)
+        assert isinstance(result, _core.PauliStringSumSymbolic)
         coeff, _ = result.to_dictionary()[0]
         assert _core.PauliStringSymbolic.to_complex(coeff) == pytest.approx(2.0 + 0j)
 
     def test_subs_multiple_symbols(self):
         qh = _symbolic_qh(("a", {0: "X"}), ("b", {1: "Z"}))
         result = qh.subs({"a": 1.0 + 0j, "b": 3.0 + 0j})
-        assert isinstance(result, _core.QubitHamiltonianSymbolic)
+        assert isinstance(result, _core.PauliStringSumSymbolic)
         d = result.to_dictionary()
         assert len(d) == 2
 
     def test_subs_partial_substitution_leaves_remaining_symbolic(self):
         qh = _symbolic_qh(("a", {0: "X"}), ("b", {1: "Z"}))
         result = qh.subs({"a": 1.0 + 0j})
-        assert isinstance(result, _core.QubitHamiltonianSymbolic)
+        assert isinstance(result, _core.PauliStringSumSymbolic)
 
     def test_subs_zero_coefficient(self):
         """Substituting a symbol with 0 removes the term via compaction."""
@@ -388,7 +388,7 @@ class TestSubstitute:
 
 
 class TestTypePromotion:
-    """Verify that symbolic presence always propagates to QubitHamiltonianSymbolic."""
+    """Verify that symbolic presence always propagates to PauliStringSumSymbolic."""
 
     @pytest.mark.parametrize(
         ("symbolic_idx", "label"),
@@ -398,19 +398,19 @@ class TestTypePromotion:
         """Symbolic term at any position promotes the Hamiltonian to symbolic."""
         ps_list = [pe.PauliString(1.0, {i: "Z"}) for i in range(3)]
         ps_list[symbolic_idx] = pe.PauliString("a", {symbolic_idx: "X"})
-        assert isinstance(pe.QubitHamiltonian(ps_list), _core.QubitHamiltonianSymbolic)
+        assert isinstance(pe.PauliStringSum(ps_list), _core.PauliStringSumSymbolic)
 
     def test_all_complex_stays_complex(self):
         ps_list = [pe.PauliString(1.0, {i: "Z"}) for i in range(3)]
-        assert isinstance(pe.QubitHamiltonian(ps_list), _core.QubitHamiltonianComplex)
+        assert isinstance(pe.PauliStringSum(ps_list), _core.PauliStringSumComplex)
 
     def test_symbolic_arithmetic_preserves_type(self):
         """Mul-by-scalar, mul-by-QH, and addition all preserve the symbolic type."""
         qh1 = _symbolic_qh(("a", {0: "X"}))
         qh2 = _symbolic_qh(("b", {0: "Z"}))
-        assert isinstance(qh1 * (2.0 + 0j), _core.QubitHamiltonianSymbolic)
-        assert isinstance(qh1 * qh2, _core.QubitHamiltonianSymbolic)
-        assert isinstance(qh1 + qh2, _core.QubitHamiltonianSymbolic)
+        assert isinstance(qh1 * (2.0 + 0j), _core.PauliStringSumSymbolic)
+        assert isinstance(qh1 * qh2, _core.PauliStringSumSymbolic)
+        assert isinstance(qh1 + qh2, _core.PauliStringSumSymbolic)
 
 
 @pytest.mark.parametrize("scalar", [3, 3.0, 3.0 + 0j])
@@ -425,8 +425,8 @@ def test_qh_scalar_mul_left_and_right(scalar):
 @pytest.mark.parametrize("scalar", [2, 2.0, 2.0 + 0j])
 def test_symbolic_qh_scalar_mul_preserves_type(scalar):
     qh = _symbolic_qh(("a", {0: "X"}))
-    assert isinstance(qh * scalar, _core.QubitHamiltonianSymbolic)
-    assert isinstance(scalar * qh, _core.QubitHamiltonianSymbolic)
+    assert isinstance(qh * scalar, _core.PauliStringSumSymbolic)
+    assert isinstance(scalar * qh, _core.PauliStringSumSymbolic)
 
 
 class TestArithmeticEdgeCases:
@@ -464,7 +464,7 @@ class TestCompaction:
         """Passing two PauliStrings with the same operator must produce one term."""
         ps1 = pe.PauliString(1.0, {0: "X"})
         ps2 = pe.PauliString(2.0, {0: "X"})
-        qh = pe.QubitHamiltonian([ps1, ps2])
+        qh = pe.PauliStringSum([ps1, ps2])
         assert _term_count(qh) == 1
         coeff, _ = qh.to_dictionary()[0]
         assert coeff == pytest.approx(3.0 + 0j)
@@ -473,14 +473,14 @@ class TestCompaction:
         """Terms that cancel must be dropped from the term list."""
         ps1 = pe.PauliString(1.0, {0: "X"})
         ps2 = pe.PauliString(-1.0, {0: "X"})
-        qh = pe.QubitHamiltonian([ps1, ps2])
+        qh = pe.PauliStringSum([ps1, ps2])
         assert _term_count(qh) == 0
 
     def test_construction_keeps_distinct_operators(self):
         """Distinct operators must NOT be merged."""
         ps1 = pe.PauliString(1.0, {0: "X"})
         ps2 = pe.PauliString(2.0, {0: "Z"})
-        qh = pe.QubitHamiltonian([ps1, ps2])
+        qh = pe.PauliStringSum([ps1, ps2])
         assert _term_count(qh) == 2
 
     def test_addition_merges_same_operators(self):
@@ -501,7 +501,7 @@ class TestCompaction:
 
     def test_hamiltonian_mul_merges_resulting_duplicates(self):
         """(2X) * Y produces a single term; duplicate products must compact."""
-        qh_xx = pe.QubitHamiltonian([
+        qh_xx = pe.PauliStringSum([
             pe.PauliString(1.0, {0: "X"}),
             pe.PauliString(1.0, {0: "X"}),
         ])
@@ -510,20 +510,20 @@ class TestCompaction:
 
     def test_equality_independent_of_internal_duplicates(self):
         """operator== must see through internal duplicates."""
-        qh_duplicated = pe.QubitHamiltonian([
+        qh_duplicated = pe.PauliStringSum([
             pe.PauliString(1.0, {0: "X"}),
             pe.PauliString(2.0, {0: "X"}),
         ])
         assert qh_duplicated == _complex_qh((3.0, {0: "X"}))
 
     def test_symbolic_construction_merges_duplicates(self):
-        qh = pe.QubitHamiltonian([pe.PauliString("a", {0: "X"}), pe.PauliString("b", {0: "X"})])
+        qh = pe.PauliStringSum([pe.PauliString("a", {0: "X"}), pe.PauliString("b", {0: "X"})])
         assert _term_count(qh) == 1
 
     # --- Zero-coefficient removal ---
 
     def test_construction_drops_zero_coeff_term(self):
-        qh = pe.QubitHamiltonian([pe.PauliString(0.0, {0: "X"})])
+        qh = pe.PauliStringSum([pe.PauliString(0.0, {0: "X"})])
         assert _term_count(qh) == 0
 
     def test_compact_removes_zero_coeff_after_scalar_mul(self):
@@ -534,7 +534,7 @@ class TestCompaction:
 
     def test_symbolic_zero_coeff_dropped(self):
         """Symbolic '0' coefficient is recognised and dropped on construction."""
-        qh = pe.QubitHamiltonian([pe.PauliString("0", {0: "X"})])
+        qh = pe.PauliStringSum([pe.PauliString("0", {0: "X"})])
         assert _term_count(qh) == 0
 
 
@@ -559,7 +559,7 @@ class TestSubtraction:
 
     def test_symbolic_sub_returns_symbolic_qh(self):
         result = _symbolic_qh(("a", {0: "X"})) - _symbolic_qh(("b", {0: "X"}))
-        assert isinstance(result, _core.QubitHamiltonianSymbolic)
+        assert isinstance(result, _core.PauliStringSumSymbolic)
         assert _term_count(result) == 1
 
     def test_sub_compacts_result(self):
@@ -576,7 +576,7 @@ class TestPauliStringAddSub:
         ps1 = pe.PauliString(1.0, {0: "X"})
         ps2 = pe.PauliString(2.0, {0: "X"})
         result = ps1 + ps2
-        assert isinstance(result, _core.QubitHamiltonianComplex)
+        assert isinstance(result, _core.PauliStringSumComplex)
         assert _term_count(result) == 1
         assert result.to_dictionary()[0][0] == pytest.approx(3.0 + 0j)
 
@@ -593,15 +593,15 @@ class TestPauliStringAddSub:
 
     def test_symbolic_ps_add_returns_symbolic_qh(self):
         result = pe.PauliString("a", {0: "X"}) + pe.PauliString("b", {0: "Z"})
-        assert isinstance(result, _core.QubitHamiltonianSymbolic)
+        assert isinstance(result, _core.PauliStringSumSymbolic)
 
     def test_cross_type_promotes_to_symbolic(self):
         """Either direction of complex + symbolic must yield a symbolic QH."""
         ps_c = pe.PauliString(1.0, {0: "X"})
         ps_s = pe.PauliString("a", {0: "Z"})
-        assert isinstance(ps_c + ps_s, _core.QubitHamiltonianSymbolic)
-        assert isinstance(ps_s + ps_c, _core.QubitHamiltonianSymbolic)
-        assert isinstance(ps_c - ps_s, _core.QubitHamiltonianSymbolic)
+        assert isinstance(ps_c + ps_s, _core.PauliStringSumSymbolic)
+        assert isinstance(ps_s + ps_c, _core.PauliStringSumSymbolic)
+        assert isinstance(ps_c - ps_s, _core.PauliStringSumSymbolic)
 
 
  
@@ -738,7 +738,7 @@ class TestSimplify:
 
     def test_simplify_returns_correct_type(self):
         qh = _complex_qh((1.0, {0: "X"}))
-        assert isinstance(qh.simplify(), _core.QubitHamiltonianComplex)
+        assert isinstance(qh.simplify(), _core.PauliStringSumComplex)
 
 
  
@@ -895,25 +895,25 @@ class TestToMatrix:
 
 class TestZeroUnit:
     def test_zero_is_empty(self):
-        zero = _core.QubitHamiltonianComplex.zero()
+        zero = _core.PauliStringSumComplex.zero()
         assert zero.size() == 0
 
     def test_unit_is_identity(self):
-        unit = _core.QubitHamiltonianComplex.unit()
+        unit = _core.PauliStringSumComplex.unit()
         assert unit.size() == 1
         coeff, ops = unit.to_dictionary()[0]
         assert coeff == pytest.approx(1.0 + 0j)
         assert ops == {}
 
     def test_factory_zero_returns_complex(self):
-        assert isinstance(pe.QubitHamiltonian.zero(), _core.QubitHamiltonianComplex)
+        assert isinstance(pe.PauliStringSum.zero(), _core.PauliStringSumComplex)
 
     def test_factory_unit_returns_complex(self):
-        assert isinstance(pe.QubitHamiltonian.unit(), _core.QubitHamiltonianComplex)
+        assert isinstance(pe.PauliStringSum.unit(), _core.PauliStringSumComplex)
 
     def test_unit_mul_is_identity_for_h(self):
         h = _complex_qh((1.0, {0: "X"}))
-        u = _core.QubitHamiltonianComplex.unit()
+        u = _core.PauliStringSumComplex.unit()
         assert h * u == h
 
 
@@ -938,13 +938,13 @@ class TestPaulistrings:
 class TestOpenFermionBridge:
     def test_factory_accepts_qubit_operator(self):
         qop = 1.5 * QubitOperator("X0 Y1") + 0.5 * QubitOperator("Z2")
-        qh = pe.QubitHamiltonian(qop)
-        assert isinstance(qh, _core.QubitHamiltonianComplex)
+        qh = pe.PauliStringSum(qop)
+        assert isinstance(qh, _core.PauliStringSumComplex)
         assert qh.size() == 2
 
     def test_factory_qubit_operator_correct_coefficients(self):
         qop = QubitOperator("X0", 1.5) + QubitOperator("Z1", 0.5j)
-        qh = pe.QubitHamiltonian(qop)
+        qh = pe.PauliStringSum(qop)
         d = dict(
             (tuple(sorted(ops.items())), coeff) for coeff, ops in qh.to_dictionary()
         )
@@ -953,12 +953,12 @@ class TestOpenFermionBridge:
 
     def test_empty_qubit_operator(self):
         qop = QubitOperator.zero()
-        qh = pe.QubitHamiltonian(qop)
+        qh = pe.PauliStringSum(qop)
         assert qh.size() == 0
 
     def test_identity_qubit_operator(self):
         qop = QubitOperator("", 3.0)
-        qh = pe.QubitHamiltonian(qop)
+        qh = pe.PauliStringSum(qop)
         assert qh.size() == 1
         coeff, ops = qh.to_dictionary()[0]
         assert coeff == pytest.approx(3.0 + 0j)
@@ -967,13 +967,13 @@ class TestOpenFermionBridge:
     def test_from_openfermion_function(self):
         qop = QubitOperator("X0", 2.0)
         qh = pe.from_openfermion(qop)
-        assert isinstance(qh, _core.QubitHamiltonianComplex)
+        assert isinstance(qh, _core.PauliStringSumComplex)
         assert qh.size() == 1
 
     def test_to_openfermion_roundtrip(self):
         qop = 1.5 * QubitOperator("X0 Y1") + 0.5j * QubitOperator("Z2")
-        qh = pe.QubitHamiltonian(qop)
-        qop_back = pe.QubitHamiltonian.to_openfermion(qh)
+        qh = pe.PauliStringSum(qop)
+        qop_back = pe.PauliStringSum.to_openfermion(qh)
         assert qop == qop_back
 
     def test_from_openfermion_wrong_type_raises(self):
@@ -983,7 +983,7 @@ class TestOpenFermionBridge:
 
  
 # trace_out_qubits — purity (regression coverage for the in-place mutation /
-# pre-sized vector bugs in QubitHamiltonian::trace_out_qubits)
+# pre-sized vector bugs in PauliStringSum::trace_out_qubits)
  
 
 class TestTraceOutPurity:
@@ -1080,7 +1080,7 @@ class TestDiff:
         assert qh.diff("c").size() == 0
 
     def test_diff_drops_constant_terms(self):
-        qh = pe.QubitHamiltonian([("a", {0: "X"}), (0.5, {1: "Z"})])
+        qh = pe.PauliStringSum([("a", {0: "X"}), (0.5, {1: "Z"})])
         result = qh.diff("a")
         assert result.size() == 1
 
@@ -1092,7 +1092,7 @@ class TestDiff:
 
 class TestSymbolicEquality:
     def test_compound_coefficient_self_equality(self):
-        qh = pe.QubitHamiltonian([("a", {0: "X"}), (0.5, {0: "X"})])
+        qh = pe.PauliStringSum([("a", {0: "X"}), (0.5, {0: "X"})])
         assert qh == qh
 
     def test_float_sum_coefficient_equality(self):
@@ -1169,7 +1169,7 @@ class TestContains:
         assert qh.contains("ZZ") == 0
 
     def test_identity(self):
-        qh = pe.QubitHamiltonian.unit() * 3.0
+        qh = pe.PauliStringSum.unit() * 3.0
         assert qh.contains({}) == pytest.approx(3.0)
         assert qh.contains("") == pytest.approx(3.0)
 
@@ -1201,9 +1201,9 @@ def terms(count, n):
 
 
 for n in (6, 70, 200):
-    a = pe.QubitHamiltonian(terms(150, n))
-    b = pe.QubitHamiltonian(terms(150, n))
-    long_list = pe.QubitHamiltonian(terms(6000, n))
+    a = pe.PauliStringSum(terms(150, n))
+    b = pe.PauliStringSum(terms(150, n))
+    long_list = pe.PauliStringSum(terms(6000, n))
     for h in (a * b, a.commutator(b), long_list):
         print([(c.real.hex(), c.imag.hex(), sorted(ops.items())) for c, ops in h.to_dictionary()])
 """
@@ -1235,7 +1235,7 @@ class TestParallelCompaction:
             ]
 
         sa, sb = strings(120), strings(120)
-        a, b = pe.QubitHamiltonian(sa), pe.QubitHamiltonian(sb)
+        a, b = pe.PauliStringSum(sa), pe.PauliStringSum(sb)
         result = a * b if operation == "product" else a.commutator(b)
 
         expected = {}
@@ -1268,8 +1268,8 @@ class TestParallelCompaction:
             return out
 
         shared = strings()
-        a = pe.QubitHamiltonian(shared + strings())
-        b = pe.QubitHamiltonian(shared + strings())  # equal terms give identity products
+        a = pe.PauliStringSum(shared + strings())
+        b = pe.PauliStringSum(shared + strings())  # equal terms give identity products
 
         def summed(pair_term):
             expected = {}
@@ -1290,15 +1290,32 @@ class TestParallelCompaction:
         # Long runs of equal keys walk through every byte of the radix sort.
         terms = [(float(i % 7), {3: "X", 70: "Z"}) for i in range(10000)]
         terms += [(1.0, {3: "X", 70: "Y"}) for _ in range(10000)]
-        h = pe.QubitHamiltonian(terms)
+        h = pe.PauliStringSum(terms)
         assert sorted(complex(c).real for c, _ in h.to_dictionary()) == [10000.0, sum(float(i % 7) for i in range(10000))]
 
     def test_terms_that_cancel_are_dropped_in_parallel_path(self):
         strings = [(1.5, {q: "X", q + 1: "Z"}) for q in range(5000)]
-        h = pe.QubitHamiltonian(strings + [(-c, ops) for c, ops in strings])
+        h = pe.PauliStringSum(strings + [(-c, ops) for c, ops in strings])
         assert h.to_dictionary() == []
 
     def test_constructor_merges_in_parallel_path(self):
-        h = pe.QubitHamiltonian([(0.5, {q % 10: "Y"}) for q in range(20000)])
+        h = pe.PauliStringSum([(0.5, {q % 10: "Y"}) for q in range(20000)])
         assert sorted((complex(c), tuple(ops.items())) for c, ops in h.to_dictionary()) == sorted(
             (complex(1000), ((q, "Y"),)) for q in range(10))
+
+
+def test_old_qubit_hamiltonian_names():
+    """Code written for the old name QubitHamiltonian keeps working."""
+    import pauliengine._core as core
+    from pauliengine.qubit_hamiltonian import QubitHamiltonian as OldFactory
+
+    assert pe.QubitHamiltonian is pe.PauliStringSum and OldFactory is pe.PauliStringSum
+    assert core.QubitHamiltonianComplex is core.PauliStringSumComplex
+    assert core.QubitHamiltonianSymbolic is core.PauliStringSumSymbolic
+    assert core.unweighted_QubitHamiltonian is core.unweighted_PauliStringSum
+    h = pe.QubitHamiltonian([(1.0, {0: "X"}), (0.5, {1: "Z"})])
+    assert isinstance(h, core.QubitHamiltonianComplex) and type(h).__name__ == "PauliStringSumComplex"
+    cycle = pe.PauliCycle(4, "XIII", 0.5)
+    assert cycle.to_qubit_hamiltonian() == cycle.to_pauli_string_sum()
+    orbit = pe.PauliOrbit(4, 1, 0, 1)
+    assert orbit.to_qubit_hamiltonian() == orbit.to_pauli_string_sum()

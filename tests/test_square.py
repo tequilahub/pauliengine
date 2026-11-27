@@ -23,7 +23,7 @@ def random_hamiltonian(n_terms, n_qubits, weight=None, seed=0, complex_coeffs=Fa
         ops = {q: p for q, p in ops.items() if p != "I"}
         c = complex(rng.uniform(-1, 1), rng.uniform(-1, 1) if complex_coeffs else 0.0)
         terms.append(pe.PauliString(c, ops))
-    return pe.QubitHamiltonian(terms)
+    return pe.PauliStringSum(terms)
 
 
 def as_dict(h, tol=1e-12):
@@ -38,7 +38,7 @@ def assert_same(a, b):
 
 
 def copy_of(h):
-    return pe.QubitHamiltonian(h.paulistrings())
+    return pe.PauliStringSum(h.paulistrings())
 
 
 @pytest.mark.parametrize(
@@ -70,7 +70,7 @@ def test_power_matches_repeated_product():
 
 def test_anticommuting_terms_cancel_exactly():
     # (aX + bZ)^2 = (a^2 + b^2) I: the XZ and ZX products cancel
-    h = pe.QubitHamiltonian([pe.PauliString(0.5, "X"), pe.PauliString(-2.0, "Z")])
+    h = pe.PauliStringSum([pe.PauliString(0.5, "X"), pe.PauliString(-2.0, "Z")])
     sq = h * h
     assert len(sq) == 1
     assert as_dict(sq, tol=0) == {(): pytest.approx(4.25)}
@@ -78,21 +78,21 @@ def test_anticommuting_terms_cancel_exactly():
 
 def test_commuting_terms_double():
     # (aZ0 + bZ1)^2 = (a^2 + b^2) I + 2ab Z0 Z1
-    h = pe.QubitHamiltonian([pe.PauliString(3.0, "Z0"), pe.PauliString(0.5, "Z1")])
+    h = pe.PauliStringSum([pe.PauliString(3.0, "Z0"), pe.PauliString(0.5, "Z1")])
     assert as_dict(h * h) == {(): 9.25, ((0, "Z"), (1, "Z")): 3.0}
 
 
 def test_empty_and_zero_terms():
-    assert len(pe.QubitHamiltonian([]) ** 2) == 0
+    assert len(pe.PauliStringSum([]) ** 2) == 0
     h = random_hamiltonian(10, 5, seed=3) * 0     # zero coefficients are kept by the scaling
     assert len(h * h) == 0
 
 
 def test_symbolic_square():
-    h = pe.QubitHamiltonian([pe.PauliString("a", "X"), pe.PauliString("b", "Z"), pe.PauliString("c", "Z1")])
+    h = pe.PauliStringSum([pe.PauliString("a", "X"), pe.PauliString("b", "Z"), pe.PauliString("c", "Z1")])
     sq = h * h
-    assert isinstance(sq, _core.QubitHamiltonianSymbolic)
-    general = h * pe.QubitHamiltonian(h.paulistrings())
+    assert isinstance(sq, _core.PauliStringSumSymbolic)
+    general = h * pe.PauliStringSum(h.paulistrings())
     values = {"a": 0.3 + 0j, "b": -1.1 + 0j, "c": 2.0 + 0j}
 
     def evaluated(q):

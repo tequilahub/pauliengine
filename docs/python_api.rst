@@ -3,9 +3,14 @@ Python API
 
 .. currentmodule:: pauliengine
 
-The factories ``PauliString`` and ``QubitHamiltonian`` pick the numeric or the
-symbolic class from the coefficient types; the classes below are what they
-return.
+The factories ``PauliString`` and ``PauliStringSum`` pick the numeric or the
+symbolic class from the coefficient types, and for low-weight operators on many
+qubits the sparse class (``SparsePauliStringComplex``, ``SparsePauliStringSumComplex``
+and their symbolic variants; see ``set_sparse_threshold``); the classes below are
+what they return. ``isinstance(x, pauliengine.PauliString)`` and
+``isinstance(x, pauliengine.PauliStringSum)`` accept all of them. The sparse
+classes have the same methods as the ones with bit vectors, plus ``to_dense()``,
+``fits_sparse()`` and, for strings, ``sites``.
 
 Pauli strings
 -------------
@@ -19,19 +24,24 @@ Pauli strings
 
 .. autoclass:: pauliengine._core.unweighted_pauliString
 
-Qubit Hamiltonians
-------------------
+Pauli string sums (qubit Hamiltonians)
+--------------------------------------
 
-.. autoclass:: pauliengine.qubit_hamiltonian.QubitHamiltonianFactory
+``PauliStringSum`` was called ``QubitHamiltonian`` before; the old names
+(``QubitHamiltonian``, ``QubitHamiltonianComplex``, ``QubitHamiltonianSymbolic``,
+``unweighted_QubitHamiltonian``, ``to_qubit_hamiltonian()``, the module
+``pauliengine.qubit_hamiltonian``) remain as aliases.
+
+.. autoclass:: pauliengine.pauli_string_sum.PauliStringSumFactory
    :members: __call__, from_matrix, from_openfermion, to_openfermion, zero, unit
 
 .. autofunction:: pauliengine.from_openfermion
 
-.. autoclass:: pauliengine._core.QubitHamiltonianComplex
+.. autoclass:: pauliengine._core.PauliStringSumComplex
 
-.. autoclass:: pauliengine._core.QubitHamiltonianSymbolic
+.. autoclass:: pauliengine._core.PauliStringSumSymbolic
 
-.. autoclass:: pauliengine._core.unweighted_QubitHamiltonian
+.. autoclass:: pauliengine._core.unweighted_PauliStringSum
 
 Pauli cycles
 ------------

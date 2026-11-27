@@ -11,8 +11,9 @@ from ._core import (
     PauliCycleSumSymbolic,
     PauliCycleSymbolic,
     PauliStringSymbolic,
+    SparsePauliStringSymbolic,
 )
-from .qubit_hamiltonian import _complex_coeff_to_expression, _to_symbolic_ps
+from .pauli_string_sum import _complex_coeff_to_expression, _to_symbolic_ps
 
 
 def _is_symbolic_coeff(coeff: Any) -> bool:
@@ -59,7 +60,7 @@ class PauliCycleFactory(_CoefficientFactory):
         PauliCycle(4, "XZ")                     # coefficient 1
         PauliCycle(4, {0: "X", 1: "Z"}, 0.5)
         PauliCycle(4, "XZ", "a")                # symbolic coefficient a
-        PauliCycle(4, PauliString("a", "XZ"))   # base with its coefficient
+        PauliCycle(4, PauliString("a", "XZ"))   # base with its coefficient (also sparse)
     """
 
     def __init__(self) -> None:
@@ -68,7 +69,7 @@ class PauliCycleFactory(_CoefficientFactory):
     def __call__(self, n_qubits: int, *args: Any, **kwargs: Any):
         base = args[0] if args else kwargs.get("data", kwargs.get("pauli_string", kwargs.get("base")))
         coeff = args[1] if len(args) > 1 else kwargs.get("coeff")
-        if isinstance(base, PauliStringSymbolic) or _is_symbolic_coeff(coeff):
+        if isinstance(base, (PauliStringSymbolic, SparsePauliStringSymbolic)) or _is_symbolic_coeff(coeff):
             if coeff is not None:
                 if len(args) > 1:
                     args = (args[0], _as_expression(coeff), *args[2:])

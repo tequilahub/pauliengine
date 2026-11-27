@@ -1,3 +1,4 @@
+#include <bit>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/complex.h>
 #include <nanobind/stl/string.h>
@@ -6,6 +7,7 @@
 #include <nanobind/stl/map.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/variant.h>
 #include <nanobind/ndarray.h>
 
 #include "pauliengine/QubitHamiltonian.h"
@@ -17,6 +19,7 @@
 #include "pauliengine/PauliOrbitSum.h"
 #include "pauliengine/Info.h"
 #include "pauliengine/Arithmetic.h"
+#include "pauliengine/SparsePauliStringSum.h"
 #include "pauliengine/PauliDecomposition.h"
 
 #ifdef PAULIENGINE_HAS_OPENMP
@@ -66,6 +69,10 @@ using PSC = PauliString<std::complex<double>>;
 using PSS = PauliString<SymEngine::Expression>;
 using QHC = QubitHamiltonian<std::complex<double>>;
 using QHS = QubitHamiltonian<SymEngine::Expression>;
+using SPC = SparsePauliString<std::complex<double>>;
+using SPS = SparsePauliString<SymEngine::Expression>;
+using SQC = SparsePauliStringSum<std::complex<double>>;
+using SQS = SparsePauliStringSum<SymEngine::Expression>;
 
 // Whether a coefficient returned by contains() is non-zero (for `in`).
 static bool coeff_nonzero(const std::complex<double>& c) { return c != std::complex<double>(0.0, 0.0); }
@@ -132,28 +139,85 @@ void bind_eq_fallback(Cls& cls) {
                 nb::arg("other").none(), "NotImplemented for objects of other types.");
 }
 
+// A term of a list given to a constructor: a Pauli string with bit vectors or a
+// sparse one, in any mix.
+template <typename C>
+using AnyString = std::variant<PauliString<C>, SparsePauliString<C>>;
+
+template <typename C>
+std::vector<PauliString<C>> dense_strings(const std::vector<AnyString<C>>& terms) {
+        std::vector<PauliString<C>> out;
+        out.reserve(terms.size());
+        for (const auto& t : terms) {
+                if (const auto* d = std::get_if<PauliString<C>>(&t)) out.push_back(*d);
+                else out.push_back(std::get<SparsePauliString<C>>(t).to_dense());
+        }
+        return out;
+}
+
+template <typename C>
+std::vector<SparsePauliString<C>> sparse_strings(const std::vector<AnyString<C>>& terms) {
+        std::vector<SparsePauliString<C>> out;
+        out.reserve(terms.size());
+        for (const auto& t : terms) {
+                if (const auto* sp = std::get_if<SparsePauliString<C>>(&t)) out.push_back(*sp);
+                else out.emplace_back(std::get<PauliString<C>>(t));
+        }
+        return out;
+}
+
+// The result of a sum or difference, as returned to Python: a sparse operator that no
+// longer fits the sparse representation (its strings grew too heavy, see
+// pauliengine_detail::sparse_stays) is handed back with bit vectors instead.
+template <typename T>
+T finish(T value) {
+        return value;
+}
+template <typename C>
+nb::object finish(SparsePauliStringSum<C> h) {
+        if (h.fits_sparse()) return nb::cast(std::move(h));
+        return nb::cast(h.to_dense());
+}
+template <typename C>
+nb::object finish(SparsePauliString<C> s) {
+        if (s.fits_sparse()) return nb::cast(std::move(s));
+        return nb::cast(s.to_dense());
+}
+
+// Products and commutators (also square and power) are always handed back with
+// bit vectors: they make strings heavier, so their results rarely stay sparse.
+// They are still computed with the sparse kernels when both operands are sparse.
+template <typename T>
+auto dense_result(T value) {
+        if constexpr (pauliengine_detail::is_sparse<T>) {
+                return value.to_dense();
+        } else {
+                return value;
+        }
+}
+
 // Arithmetic of an unweighted string or set U with a weighted operator W
 // (Arithmetic.h): U counts with coefficient 1.0 * i**k on every element.
 template <typename W, typename U, typename ClsW, typename ClsU>
 void bind_unweighted_pair(ClsW& cls_w, ClsU& cls_u) {
-        cls_w.def("__add__", [](const W& a, const U& b) { return a + b; },
+        cls_w.def("__add__", [](const W& a, const U& b) { return finish(a + b); },
                   "Sum with an unweighted operator, which counts with coefficient 1.0 * i**phase.")
-             .def("__mul__", [](const W& a, const U& b) { return a * b; },
+             .def("__mul__", [](const W& a, const U& b) { return dense_result(a * b); },
                   "Product with an unweighted operator, which counts with coefficient 1.0 * i**phase.")
-             .def("commutator", [](const W& a, const U& b) { return commutator(a, b); }, nb::arg("other"),
+             .def("commutator", [](const W& a, const U& b) { return dense_result(commutator(a, b)); }, nb::arg("other"),
                   "Commutator with an unweighted operator, which counts with coefficient 1.0 * i**phase.");
-        cls_u.def("__add__", [](const U& a, const W& b) { return a + b; },
+        cls_u.def("__add__", [](const U& a, const W& b) { return finish(a + b); },
                   "Sum with another operator; next to a weighted one this counts with coefficient 1.0 * i**phase.")
-             .def("__mul__", [](const U& a, const W& b) { return a * b; },
+             .def("__mul__", [](const U& a, const W& b) { return dense_result(a * b); },
                   "Product with another operator; next to a weighted one this counts with coefficient 1.0 * i**phase.")
-             .def("commutator", [](const U& a, const W& b) { return commutator(a, b); }, nb::arg("other"),
+             .def("commutator", [](const U& a, const W& b) { return dense_result(commutator(a, b)); }, nb::arg("other"),
                   "Commutator with another operator; next to a weighted one this counts with coefficient 1.0 * i**phase.");
-        cls_w.def("__sub__", [](const W& a, const U& b) { return a - b; },
+        cls_w.def("__sub__", [](const W& a, const U& b) { return finish(a - b); },
                   "Difference with an unweighted operator, which counts with coefficient 1.0 * i**phase.")
              .def("inner_product", [](const W& a, const U& b) { return inner_product(a, b); }, nb::arg("other"),
                   "Normalized Hilbert-Schmidt inner product with an unweighted operator, which counts with "
                   "coefficient 1.0 * i**phase.");
-        cls_u.def("__sub__", [](const U& a, const W& b) { return a - b; },
+        cls_u.def("__sub__", [](const U& a, const W& b) { return finish(a - b); },
                   "Difference with a weighted operator; this counts with coefficient 1.0 * i**phase.")
              .def("inner_product", [](const U& a, const W& b) { return inner_product(a, b); }, nb::arg("other"),
                   "Normalized Hilbert-Schmidt inner product with a weighted operator; this counts with "
@@ -182,7 +246,7 @@ template <typename... Ts>
 struct TypeList {};
 
 /// Every operator representation, for the mixed arithmetic below.
-using AllOperators = TypeList<PSC, PSS, QHC, QHS, CYC, CYS, CSC, CSS, PauliOrbit, OSC, OSS>;
+using AllOperators = TypeList<PSC, PSS, QHC, QHS, CYC, CYS, CSC, CSS, PauliOrbit, OSC, OSS, SPC, SPS, SQC, SQS>;
 
 // Pairs whose operation is bound by the class itself, so the mixed binding is left out.
 template <typename A, typename B>
@@ -194,6 +258,73 @@ inline constexpr bool own_mul = (pauliengine_detail::is_pauli_string<A> && pauli
 template <typename A, typename B>
 inline constexpr bool own_commutator = std::is_same_v<A, B>;
 
+// Whether a Pauli string or Hamiltonian with bit vectors would itself be sparse
+// (pauliengine_detail::sparse_stays): only then does a sparse operand next to it
+// keep the operation sparse.
+template <typename C>
+bool dense_fits_sparse(const PauliString<C>& ps) {
+        size_t weight = 0;
+        int top = -1;
+        for (size_t w = 0; w < ps.x.size(); ++w) {
+                const uint64_t bits = ps.x[w] | ps.y[w];
+                weight += static_cast<size_t>(std::popcount(bits));
+                if (bits) top = static_cast<int>(64 * w + 63 - std::countl_zero(bits));
+        }
+        return pauliengine_detail::sparse_stays(top + 1.0, static_cast<double>(weight));
+}
+template <typename C>
+bool dense_fits_sparse(const QubitHamiltonian<C>& h) {
+        size_t max_weight = 0;
+        int top = -1;
+        for (const auto& ps : h.terms()) {
+                size_t weight = 0;
+                for (size_t w = 0; w < ps.x.size(); ++w) {
+                        const uint64_t bits = ps.x[w] | ps.y[w];
+                        weight += static_cast<size_t>(std::popcount(bits));
+                        if (bits) top = std::max(top, static_cast<int>(64 * w + 63 - std::countl_zero(bits)));
+                }
+                max_weight = std::max(max_weight, weight);
+        }
+        return pauliengine_detail::sparse_stays(top + 1.0, static_cast<double>(max_weight));
+}
+
+template <typename T>
+inline constexpr bool is_dense_string_family = pauliengine_detail::is_pauli_string<T> || pauliengine_detail::is_hamiltonian<T>;
+
+// a + b or a - b for the bindings. A sparse operand next to a Pauli string or Hamiltonian
+// with bit vectors that does not fit the sparse representation (for example a
+// product that already went back to bit vectors) is turned into bit vectors
+// instead, so that chains of operations do not switch back and forth.
+template <typename A, typename B, typename Op>
+auto mixed(const A& a, const B& b, Op op) {
+        using namespace pauliengine_detail;
+        if constexpr (is_sparse<A> && is_dense_string_family<B>) {
+                if (!dense_fits_sparse(b)) return nb::cast(op(a.to_dense(), b));
+                return nb::object(finish(op(a, b)));
+        } else if constexpr (is_dense_string_family<A> && is_sparse<B>) {
+                if (!dense_fits_sparse(a)) return nb::cast(op(a, b.to_dense()));
+                return nb::object(finish(op(a, b)));
+        } else {
+                return finish(op(a, b));
+        }
+}
+
+// a * b or [a, b] for the bindings, always with bit vectors (see dense_result).
+// A sparse operand next to a Pauli string or Hamiltonian with bit vectors is
+// converted first, so the dense kernels do the work; next to cycles, orbits and
+// other sparse operators the sparse kernels run and only the result is converted.
+template <typename A, typename B, typename Op>
+auto product_like(const A& a, const B& b, Op op) {
+        using namespace pauliengine_detail;
+        if constexpr (is_sparse<A> && is_dense_string_family<B>) {
+                return dense_result(op(a.to_dense(), b));
+        } else if constexpr (is_dense_string_family<A> && is_sparse<B>) {
+                return dense_result(op(a, b.to_dense()));
+        } else {
+                return dense_result(op(a, b));
+        }
+}
+
 // Mixed arithmetic (see Arithmetic.h): register +, -, *, commutator and
 // inner_product of class A with every B, unless A binds the operation itself.
 template <typename A, typename Cls, typename... Bs>
@@ -201,18 +332,18 @@ void bind_arithmetic(Cls& cls, TypeList<Bs...>) {
         ([&] {
                 using B = Bs;
                 if constexpr (!own_add<A, B>) {
-                        cls.def("__add__", [](const A& a, const B& b) { return a + b; },
-                                "Sum with another operator; a QubitHamiltonian unless both are in the same family.");
-                        cls.def("__sub__", [](const A& a, const B& b) { return a - b; },
-                                "Difference with another operator; a QubitHamiltonian unless both are in the same family.");
+                        cls.def("__add__", [](const A& a, const B& b) { return mixed(a, b, [](const auto& x, const auto& y) { return x + y; }); },
+                                "Sum with another operator; a PauliStringSum unless both are in the same family.");
+                        cls.def("__sub__", [](const A& a, const B& b) { return mixed(a, b, [](const auto& x, const auto& y) { return x - y; }); },
+                                "Difference with another operator; a PauliStringSum unless both are in the same family.");
                 }
                 if constexpr (!own_mul<A, B>) {
-                        cls.def("__mul__", [](const A& a, const B& b) { return a * b; },
-                                "Product with another operator; a QubitHamiltonian unless both are in the same family.");
+                        cls.def("__mul__", [](const A& a, const B& b) { return product_like(a, b, [](const auto& x, const auto& y) { return x * y; }); },
+                                "Product with another operator; a PauliStringSum unless both are in the same family.");
                 }
                 if constexpr (!own_commutator<A, B>) {
-                        cls.def("commutator", [](const A& a, const B& b) { return commutator(a, b); }, nb::arg("other"),
-                                "Commutator [self, other] with another operator; a QubitHamiltonian unless both are in "
+                        cls.def("commutator", [](const A& a, const B& b) { return product_like(a, b, [](const auto& x, const auto& y) { return commutator(x, y); }); }, nb::arg("other"),
+                                "Commutator [self, other] with another operator; a PauliStringSum unless both are in "
                                 "the same family.");
                 }
                 cls.def("inner_product", [](const A& a, const B& b) { return inner_product(a, b); }, nb::arg("other"),
@@ -238,6 +369,10 @@ auto bind_cycle(nb::module_& m, const char* name, const char* doc) {
                 .def(nb::init<int, const PauliString<C>&>(),
                         nb::arg("n_qubits"), nb::arg("base"),
                         "From a qubit count and a base PauliString (its coefficient becomes the cycle's).")
+                .def("__init__", [](Cy* self, int n_qubits, const SparsePauliString<C>& base) {
+                                new (self) Cy(n_qubits, base.to_dense());
+                        }, nb::arg("n_qubits"), nb::arg("base"),
+                        "From a qubit count and a sparse base Pauli string (its coefficient becomes the cycle's).")
                 .def("period", &Cy::period,
                         "Number of distinct rotations d of the base (d divides n_qubits); the cycle counts each "
                         "distinct rotation n_qubits / d times.")
@@ -248,8 +383,8 @@ auto bind_cycle(nb::module_& m, const char* name, const char* doc) {
                         "The stored base shifted by k qubits, new[(i + k) mod n] = old[i] (k may be negative or >= n_qubits).")
                 .def("rotations", &Cy::rotations,
                         "All n_qubits rotations rotate(0), ..., rotate(n - 1) of the stored base.")
-                .def("to_qubit_hamiltonian", &Cy::to_qubit_hamiltonian,
-                        "The cycle expanded into a QubitHamiltonian (the sum of all n rotations).")
+                .def("to_pauli_string_sum", &Cy::to_qubit_hamiltonian,
+                        "The cycle expanded into a PauliStringSum (the sum of all n rotations).")
                 .def("commutator", &Cy::commutator, nb::arg("other"),
                         "Commutator [self, other] as a PauliCycleSum (Eq. 40). Only shifts at which the supports "
                         "overlap contribute, so it is cheap for bounded weight. Raises ValueError on an n_qubits mismatch.")
@@ -296,8 +431,8 @@ auto bind_cycle_sum(nb::module_& m, const char* name, const char* doc) {
         auto cls = nb::class_<Sum>(m, name, doc)
                 .def(nb::init<std::vector<Cy>>(), nb::arg("data"),
                         "Construct from a list of cycles (cycles in the same rotation orbit are merged, zeros dropped).")
-                .def("to_qubit_hamiltonian", &Sum::to_qubit_hamiltonian,
-                        "The sum expanded into a QubitHamiltonian.")
+                .def("to_pauli_string_sum", &Sum::to_qubit_hamiltonian,
+                        "The sum expanded into a PauliStringSum.")
                 .def("commutator", &Sum::commutator, nb::arg("other"),
                         "Commutator [self, other] = sum_ij [c_i, d_j], merged.")
                 .def("targeted_commutator", [](const Sum& a, const Sum& b, const CYC& t) { return a.targeted_commutator(b, t); },
@@ -344,8 +479,8 @@ auto bind_orbit_sum(nb::module_& m, const char* name, const char* doc) {
                         nb::arg("orbit"), nb::arg("coeff"),
                         "Add coeff * orbit in place, with a numeric coefficient.");
         }
-        cls.def("to_qubit_hamiltonian", &Sum::to_qubit_hamiltonian,
-                        "The sum expanded into a QubitHamiltonian.")
+        cls.def("to_pauli_string_sum", &Sum::to_qubit_hamiltonian,
+                        "The sum expanded into a PauliStringSum.")
                 .def("prune_zeros", &Sum::prune_zeros, "Drop terms whose coefficient is zero, in place.")
                 .def("commutator", &Sum::commutator, nb::arg("other"),
                         "Commutator [self, other] = sum_ij a_i b_j [B_i, B_j].")
@@ -366,9 +501,191 @@ auto bind_orbit_sum(nb::module_& m, const char* name, const char* doc) {
 }
 
 
+// SparsePauliString with coefficients of type C.
+template <typename C>
+auto bind_sparse_string(nb::module_& m, const char* name, const char* doc) {
+        using S = SparsePauliString<C>;
+        using Dense = PauliString<C>;
+        auto cls = nb::class_<S>(m, name, doc)
+                .def(nb::init<C, const std::unordered_map<int, std::string>&>(), nb::arg("coeff"), nb::arg("data"),
+                        "From a coefficient and a map {qubit: 'X'/'Y'/'Z'/'I'}.")
+                .def("__init__", [](S* self, C coeff, const std::string& text) { new (self) S(Dense(coeff, text)); },
+                        nb::arg("coeff"), nb::arg("pauli_string"),
+                        "From a coefficient and a text: dense such as 'XIZ' or sparse such as 'X0 Z2'.")
+                .def(nb::init<const Dense&>(), nb::arg("pauli_string"), "The same string as a Pauli string with bit vectors.")
+                .def("to_dense", &S::to_dense, "The string as a Pauli string with bit vectors.")
+                .def("to_string", &S::to_string, "Human-readable form, e.g. '1.000000 + 0.000000i : X(0)Z(2)'.")
+                .def("__str__", &S::to_string, "Human-readable form.")
+                .def("__repr__", &S::to_string, "Human-readable form.")
+                .def("size", &S::size, "Number of qubits with a non-identity operator (the weight).")
+                .def("__len__", &S::size, "Number of qubits with a non-identity operator (the weight).")
+                .def("qubits", &S::qubits, "Sorted list of the qubits with a non-identity operator.")
+                .def("get_pauli_at_index", &S::get_pauli_at_index, "Pauli operator ('I', 'X', 'Y' or 'Z') on the given qubit.")
+                .def("count_y", &S::count_y, "Number of Y operators.")
+                .def("is_all_z", &S::is_all_z, "True if every non-identity operator is Z.")
+                .def("to_dictionary", &S::to_dictionary, "The string as a (coefficient, {qubit: 'X'/'Y'/'Z'}) pair.")
+                .def("key_openfermion", &S::key_openfermion, "OpenFermion-style key: list of (Pauli, qubit) pairs, sorted by qubit.")
+                .def("equals", &S::equals, "True if the operators are equal, ignoring the coefficients.")
+                .def("naked", &S::naked, "Copy with coefficient 1.")
+                .def("copy", [](const S& s) { return s; }, "An independent copy.")
+                .def("get_coeff", [](const S& s) { return s.coeff; }, "The coefficient.")
+                .def("set_coeff", [](S& s, C c) { s.coeff = c; }, "Replace the coefficient (in place).")
+                .def_ro("coeff", &S::coeff, "The coefficient (read-only).")
+                .def_prop_ro("sites", [](const S& s) {
+                        std::vector<std::pair<int, std::string>> out;
+                        out.reserve(s.sites.size());
+                        for (auto site : s.sites) {
+                                out.emplace_back(static_cast<int>(pauliengine_detail::site_qubit(site)),
+                                                 std::string(1, pauliengine_detail::pauli_letter(pauliengine_detail::site_pauli(site))));
+                        }
+                        return out;
+                }, "The non-identity sites as (qubit, Pauli) pairs by ascending qubit.")
+                .def_prop_ro("x", [](const S& s) { return s.to_dense().x.to_vector(); },
+                        "x bits as 64-bit words (as PauliString.x; formed from the sites).")
+                .def_prop_ro("y", [](const S& s) { return s.to_dense().y.to_vector(); },
+                        "y bits as 64-bit words (as PauliString.y; formed from the sites).")
+                .def_prop_ro("is_zero", [](const S& s) { return pauliengine_detail::coeff_is_zero(s.coeff); },
+                        "True if the coefficient is zero.")
+                .def("__hash__", [](const S& s) { return static_cast<Py_ssize_t>(s.to_dense().hash()); },
+                        "Hash over the operator part, the same as for the Pauli string with bit vectors.")
+                .def("get_hash", [](const S& s) { return hash_limbs_to_int(s.to_dense().get_hash()); },
+                        "Invertible int key of the operator part (as PauliString.get_hash()).")
+                .def("__mul__", [](const S& a, const S& b) { return dense_result(a * b); }, "Product with the phase of the Pauli algebra, as a PauliString with bit vectors.")
+                .def("commutator", [](const S& a, const S& b) { return dense_result(a.commutator(b)); }, nb::arg("other"),
+                        "Commutator [self, other]: 2 * self * other if they anti-commute, else the zero string; "
+                        "as a PauliString with bit vectors.")
+                .def("fits_sparse", &S::fits_sparse,
+                        "Whether the string still fits the sparse representation (products and commutators are "
+                        "always returned with bit vectors).")
+                .def("anticommutes", &S::anticommutes, nb::arg("other"), "True if the strings anti-commute.")
+                .def("targeted_commutator", &S::targeted_commutator, nb::arg("other"), nb::arg("target"),
+                        "Coefficient of target's operator in [self, other].")
+                .def("map_qubits", &S::map_qubits, "Copy with qubit indices remapped by {old: new}.")
+                .def("trace_out_qubits", [](const S& s, const std::vector<int>& qubits, const std::vector<int>& state) {
+                                return S(s.to_dense().trace_out_qubits(qubits, state));
+                        }, nb::arg("qubits"), nb::arg("state"), "Trace out the given qubits in computational basis states.")
+                .def("trace_out_qubits", [](const S& s, const std::vector<int>& qubits,
+                                            const std::vector<std::pair<std::complex<double>, std::complex<double>>>& states) {
+                                return S(s.to_dense().trace_out_qubits(qubits, states));
+                        }, nb::arg("qubits"), nb::arg("states"), "Trace out the given qubits in states a|0> + b|1>.");
+        if constexpr (std::is_same_v<C, SymEngine::Expression>) {
+                cls.def("diff", &S::diff, nb::arg("symbol"), "Derivative of the coefficient with respect to the named symbol.")
+                   .def("subs", &S::substitute, nb::arg("values"), "Substitute values for symbols, given as {name: complex value}.");
+        }
+        return cls;
+}
+
+// SparsePauliStringSum with coefficients of type C.
+template <typename C>
+auto bind_sparse_hamiltonian(nb::module_& m, const char* name, const char* doc) {
+        using H = SparsePauliStringSum<C>;
+        using S = SparsePauliString<C>;
+        using Dense = QubitHamiltonian<C>;
+        auto cls = nb::class_<H>(m, name, doc)
+                .def(nb::init<const std::vector<S>&>(), nb::arg("data"), "From a list of sparse Pauli strings (equal operators are merged).")
+                .def(nb::init<const std::vector<PauliString<C>>&>(), nb::arg("data"), "From a list of Pauli strings with bit vectors.")
+                .def("__init__", [](H* self, const std::vector<AnyString<C>>& data) { new (self) H(sparse_strings(data)); },
+                        nb::arg("data"), "From a list that mixes sparse Pauli strings and Pauli strings with bit vectors.")
+                .def(nb::init<const Hamiltonian_structure<C>&>(), nb::arg("data"), "From a list of (coefficient, {qubit: 'X'/'Y'/'Z'}) pairs.")
+                .def(nb::init<const Dense&>(), nb::arg("hamiltonian"), "The same operator as a Hamiltonian with bit vectors.")
+                .def("to_dense", &H::to_dense, "The operator as a PauliStringSum with bit vectors.")
+                .def("to_string", &H::to_string, "Human-readable form, one term per line.")
+                .def("__str__", &H::to_string, "Human-readable form, one term per line.")
+                .def("__repr__", &H::to_string, "Human-readable form, one term per line.")
+                .def("__len__", &H::size, "Number of terms.")
+                .def("size", &H::size, "Number of terms.")
+                .def("to_dictionary", &H::to_dictionary, "List of (coefficient, {qubit: Pauli}) pairs.")
+                .def("paulistrings", &H::paulistrings, "The terms as sparse Pauli strings.")
+                .def("to_list", &H::paulistrings, "The terms as sparse Pauli strings (same as paulistrings()).")
+                .def("contains", [](const H& h, const S& s) { return h.contains(s); }, nb::arg("pauli_string"),
+                        "Coefficient of the given Pauli string's operator (0 if absent).")
+                .def("contains", [](const H& h, const PauliString<C>& s) { return h.contains(S(s)); }, nb::arg("pauli_string"),
+                        "Coefficient of the given Pauli string's operator (0 if absent).")
+                .def("contains", [](const H& h, const std::unordered_map<int, std::string>& d) {
+                                return h.contains(S(pauliengine_detail::coeff_one<C>(), d));
+                        }, nb::arg("pauli_string"), "Coefficient of the Pauli string {qubit: 'X'} (0 if absent).")
+                .def("__contains__", [](const H& h, const S& s) { return coeff_nonzero(h.contains(s)); }, nb::arg("pauli_string"),
+                        "True if the operator has a non-zero term.")
+                .def("__contains__", [](const H& h, const PauliString<C>& s) { return coeff_nonzero(h.contains(S(s))); },
+                        nb::arg("pauli_string"), "True if the operator has a non-zero term.")
+                .def("__add__", [](const H& a, const H& b) { return finish(a + b); }, "Sum.")
+                .def("__sub__", [](const H& a, const H& b) { return finish(a - b); }, "Difference.")
+                .def("__mul__", [](const H& a, const H& b) { return dense_result(a * b); },
+                        "Product, as a PauliStringSum with bit vectors; h * h uses the square formula (only "
+                        "commuting pairs, each once).")
+                .def("square", [](const H& h) { return dense_result(h.square()); }, "self * self, visiting each commuting pair once.")
+                .def("__pow__", [](const H& h, int k) { return dense_result(h.power(k)); }, "Raise to a non-negative integer power.")
+                .def("power", [](const H& h, int k) { return dense_result(h.power(k)); }, "Raise to a non-negative integer power.")
+                .def("fits_sparse", &H::fits_sparse,
+                        "Whether the operator still fits the sparse representation; sums that do not are returned "
+                        "with bit vectors (products and commutators always are).")
+                .def("commutator", [](const H& a, const H& b) { return dense_result(a.commutator(b)); }, nb::arg("other"),
+                        "Commutator [self, other]; only pairs sharing a qubit are visited when they are few.")
+                .def("targeted_commutator", [](const H& a, const H& b, const S& t) { return a.targeted_commutator(b, t); },
+                        nb::arg("other"), nb::arg("target"), "Coefficient of target's operator in [self, other], via a hash join.")
+                .def("targeted_commutator", [](const H& a, const S& b, const S& t) {
+                                return a.targeted_commutator(H(std::vector<S>{b}), t);
+                        }, nb::arg("other"), nb::arg("target"), "Coefficient of target's operator in [self, other] for a single string other.")
+                .def("targeted_commutator", [](const H& a, const H& b, const PauliString<C>& t) { return a.targeted_commutator(b, S(t)); },
+                        nb::arg("other"), nb::arg("target"), "Coefficient of target's operator in [self, other], via a hash join.")
+                .def("qubits", &H::qubits, "Sorted list of the qubits acted on non-trivially.")
+                .def("n_qubits", &H::n_qubits, "Number of qubits acted on non-trivially.")
+                .def("is_all_z", &H::is_all_z, "True if all terms are products of Z operators only.")
+                .def("count_measurements", &H::count_measurements, "1 if is_all_z(), else the number of terms.")
+                .def("simplify", &H::simplify, nb::arg("threshold") = 0.0, "Copy without the terms whose abs(coefficient) <= threshold.")
+                .def("compact", [](const H& h) { return h; }, "The sum is always compacted; returns a copy.")
+                .def("set_all_coeff", [](const H& h, C v) { return h.set_all_coeff(v); }, nb::arg("value"),
+                        "Copy with every coefficient replaced by value.")
+                .def("dagger", &H::dagger, "Hermitian conjugate: complex-conjugates each coefficient.")
+                .def("conjugate", &H::conjugate, "Complex conjugate: conjugates each coefficient, sign flipped for an odd number of Y.")
+                .def("transpose", &H::transpose, "Transpose: sign flipped for an odd number of Y.")
+                .def("map_qubits", &H::map_qubits, "Copy with qubit indices remapped by {old: new}.")
+                .def("is_hermitian", [](const H& h) { return h.to_dense().is_hermitian(); },
+                        "True if every coefficient is real (abs(imag) <= 1e-12).")
+                .def("is_antihermitian", [](const H& h) { return h.to_dense().is_antihermitian(); },
+                        "True if every coefficient is purely imaginary (abs(real) <= 1e-12).")
+                .def("split", [](const H& h) {
+                                auto parts = h.to_dense().split();
+                                return std::make_pair(H(parts.first), H(parts.second));
+                        }, "Split into (hermitian, anti-hermitian) parts; needs numeric coefficients.")
+                .def("to_matrix", [](const H& h, bool ignore) { return h.to_dense().to_matrix(ignore); },
+                        nb::arg("ignore_unused_qubits") = true, "Dense 2**N x 2**N matrix (see PauliStringSum.to_matrix).")
+                .def("trace_out_qubits", [](const H& h, const std::vector<int>& qubits, const std::vector<int>& state) {
+                                return H(h.to_dense().trace_out_qubits(qubits, state));
+                        }, nb::arg("qubits"), nb::arg("state"), "Trace out the given qubits in computational basis states.")
+                .def("trace_out_qubits", [](const H& h, const std::vector<int>& qubits,
+                                            const std::vector<std::pair<std::complex<double>, std::complex<double>>>& states) {
+                                return H(h.to_dense().trace_out_qubits(qubits, states));
+                        }, nb::arg("qubits"), nb::arg("states"), "Trace out the given qubits in states a|0> + b|1>.")
+                .def_static("zero", &H::zero, "The zero operator.")
+                .def_static("unit", &H::unit, "The identity (one term, coefficient 1).");
+        if constexpr (std::is_same_v<C, SymEngine::Expression>) {
+                cls.def("diff", &H::diff, nb::arg("symbol"), "Derivative of every coefficient with respect to the named symbol.")
+                   .def("subs", &H::substitute, nb::arg("values"), "Substitute values for symbols, given as {name: complex value}.");
+        }
+        return cls;
+}
+
 NB_MODULE(_core, m) {
 
         m.doc() = "PauliEngine";
+
+        // When operators are stored sparse (pauliengine_detail::SparseThreshold).
+        m.def("_sparse_threshold", []() {
+                const auto& t = pauliengine_detail::sparse_threshold();
+                return std::make_pair(t.min_qubits, t.max_density);
+        }, "(min_qubits, max_density) of the sparse threshold; see pauliengine.set_sparse_threshold.");
+        m.def("_set_sparse_threshold", [](double min_qubits, double max_density) {
+                auto& t = pauliengine_detail::sparse_threshold();
+                t.min_qubits = min_qubits;
+                t.max_density = max_density;
+        }, nb::arg("min_qubits"), nb::arg("max_density"), "Set the sparse threshold; see pauliengine.set_sparse_threshold.");
+        m.def("_sparse_enters", &pauliengine_detail::sparse_enters, nb::arg("span"), nb::arg("max_weight"),
+              "Whether an operator with this span and heaviest string is built sparse.");
+        m.def("_fits_sparse", [](const QHC& h) { return dense_fits_sparse(h); }, nb::arg("hamiltonian"),
+              "Whether a sum with bit vectors would be sparse by the rule.");
+        m.def("_fits_sparse", [](const QHS& h) { return dense_fits_sparse(h); }, nb::arg("hamiltonian"),
+              "Whether a sum with bit vectors would be sparse by the rule.");
         m.attr("__build_type__") = std::string(build_type());
         m.attr("__compiler_flags__") = compiler_flags();
 
@@ -434,20 +751,20 @@ NB_MODULE(_core, m) {
                 .def("__neg__", [](const PauliString<std::complex<double>>& ps){ return ps * -1; }, "The Pauli string with negated coefficient.")
                 .def("__add__", [](const PauliString<std::complex<double>>& ps1, const PauliString<std::complex<double>>& ps2){
                         return QubitHamiltonian<std::complex<double>>({ps1, ps2});
-                }, "Add two PauliStringComplex to get QubitHamiltonianComplex")
+                }, "Add two PauliStringComplex to get PauliStringSumComplex")
                 .def("__add__", [](const PauliString<std::complex<double>>& ps1, const PauliString<SymEngine::Expression>& ps2){
                         SymEngine::Expression sym_coeff = ps1.coeff;
                         PauliString<SymEngine::Expression> ps1_sym(ps1.x, ps1.y, sym_coeff);
                         return QubitHamiltonian<SymEngine::Expression>({ps1_sym, ps2});
-                }, "Add PauliStringComplex and PauliStringSymbolic to get QubitHamiltonianSymbolic")
+                }, "Add PauliStringComplex and PauliStringSymbolic to get PauliStringSumSymbolic")
                 .def("__sub__", [](const PauliString<std::complex<double>>& ps1, const PauliString<std::complex<double>>& ps2){
                         return QubitHamiltonian<std::complex<double>>({ps1, ps2 * -1});
-                }, "Subtract two PauliStringComplex to get QubitHamiltonianComplex")
+                }, "Subtract two PauliStringComplex to get PauliStringSumComplex")
                 .def("__sub__", [](const PauliString<std::complex<double>>& ps1, const PauliString<SymEngine::Expression>& ps2){
                         SymEngine::Expression sym_coeff = ps1.coeff;
                         PauliString<SymEngine::Expression> ps1_sym(ps1.x, ps1.y, sym_coeff);
                         return QubitHamiltonian<SymEngine::Expression>({ps1_sym, ps2 * -1});
-                }, "Subtract PauliStringComplex and PauliStringSymbolic to get QubitHamiltonianSymbolic")
+                }, "Subtract PauliStringComplex and PauliStringSymbolic to get PauliStringSumSymbolic")
                 .def("qubits", &PauliString<std::complex<double>>::qubits, "Sorted list of the qubits with a non-identity operator.")
                 .def("equals", &PauliString<std::complex<double>>::equals, "True if the operators are equal, ignoring the coefficients.")
                 .def("set_coeff", &PauliString<std::complex<double>>::set_coeff, "Replace the coefficient (in place) by a complex number.")
@@ -517,20 +834,20 @@ NB_MODULE(_core, m) {
                 .def("__neg__", [](const PauliString<SymEngine::Expression>& ps){ return ps * -1; }, "The Pauli string with negated coefficient.")
                 .def("__add__", [](const PauliString<SymEngine::Expression>& ps1, const PauliString<SymEngine::Expression>& ps2){
                         return QubitHamiltonian<SymEngine::Expression>({ps1, ps2});
-                }, "Add two PauliStringSymbolic to get QubitHamiltonianSymbolic")
+                }, "Add two PauliStringSymbolic to get PauliStringSumSymbolic")
                 .def("__add__", [](const PauliString<SymEngine::Expression>& ps1, const PauliString<std::complex<double>>& ps2){
                         SymEngine::Expression sym_coeff = ps2.coeff;
                         PauliString<SymEngine::Expression> ps2_sym(ps2.x, ps2.y, sym_coeff);
                         return QubitHamiltonian<SymEngine::Expression>({ps1, ps2_sym});
-                }, "Add PauliStringSymbolic and PauliStringComplex to get QubitHamiltonianSymbolic")
+                }, "Add PauliStringSymbolic and PauliStringComplex to get PauliStringSumSymbolic")
                 .def("__sub__", [](const PauliString<SymEngine::Expression>& ps1, const PauliString<SymEngine::Expression>& ps2){
                         return QubitHamiltonian<SymEngine::Expression>({ps1, ps2 * -1});
-                }, "Subtract two PauliStringSymbolic to get QubitHamiltonianSymbolic")
+                }, "Subtract two PauliStringSymbolic to get PauliStringSumSymbolic")
                 .def("__sub__", [](const PauliString<SymEngine::Expression>& ps1, const PauliString<std::complex<double>>& ps2){
                         SymEngine::Expression sym_coeff = ps2.coeff;
                         PauliString<SymEngine::Expression> ps2_sym(ps2.x, ps2.y, sym_coeff);
                         return QubitHamiltonian<SymEngine::Expression>({ps1, ps2_sym * -1});
-                }, "Subtract PauliStringSymbolic and PauliStringComplex to get QubitHamiltonianSymbolic")
+                }, "Subtract PauliStringSymbolic and PauliStringComplex to get PauliStringSumSymbolic")
                 .def("diff", &PauliString<SymEngine::Expression>::diff, "Derivative of the coefficient with respect to the named symbol.")
                 .def("subs", &PauliString<SymEngine::Expression>::substitute, "Substitute values for symbols, given as {name: complex value}.")
                 .def("qubits", &PauliString<SymEngine::Expression>::qubits, "Sorted list of the qubits with a non-identity operator.")
@@ -564,8 +881,11 @@ NB_MODULE(_core, m) {
                         }, "True if the coefficient is (symbolically) zero.");
 
         // QubitHamiltonian for complex coefficients
-        auto cls_qhc = nb::class_<QubitHamiltonian<std::complex<double>>>(m, "QubitHamiltonianComplex", "A qubit Hamiltonian: a sum of Pauli strings with complex coefficients. Kept compacted: no two terms share an operator and zero terms are dropped.")
+        auto cls_qhc = nb::class_<QubitHamiltonian<std::complex<double>>>(m, "PauliStringSumComplex", "A sum of Pauli strings (a qubit Hamiltonian) with complex coefficients. Kept compacted: no two terms share an operator and zero terms are dropped.")
                 .def(nb::init<const std::vector<PauliString<std::complex<double>>>&>(), "From a list of Pauli strings (equal operators are merged).")
+                .def("__init__", [](QubitHamiltonian<std::complex<double>>* self, const std::vector<AnyString<std::complex<double>>>& data) {
+                                new (self) QubitHamiltonian<std::complex<double>>(dense_strings(data));
+                        }, nb::arg("data"), "From a list of Pauli strings, sparse ones or mixed (equal operators are merged).")
                 .def(nb::init<const Hamiltonian_structure<std::complex<double>>&>(), "From a list of (coefficient, {qubit: 'X'/'Y'/'Z'}) pairs.")
                 .def("contains", [](const QubitHamiltonian<std::complex<double>>& qh, const PauliString<std::complex<double>>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
                 .def("contains", [](const QubitHamiltonian<std::complex<double>>& qh, const PauliString<SymEngine::Expression>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
@@ -630,8 +950,11 @@ NB_MODULE(_core, m) {
                 .def_static("unit", &QubitHamiltonian<std::complex<double>>::unit, "Return the identity Hamiltonian (single term, coefficient 1, no operators).");
 
         // QubitHamiltonian for SymEngine::Expression coefficients
-        auto cls_qhs = nb::class_<QubitHamiltonian<SymEngine::Expression>>(m, "QubitHamiltonianSymbolic", "A qubit Hamiltonian: a sum of Pauli strings with symbolic (SymEngine) coefficients. Kept compacted: no two terms share an operator and zero terms are dropped.")
+        auto cls_qhs = nb::class_<QubitHamiltonian<SymEngine::Expression>>(m, "PauliStringSumSymbolic", "A sum of Pauli strings (a qubit Hamiltonian) with symbolic (SymEngine) coefficients. Kept compacted: no two terms share an operator and zero terms are dropped.")
                 .def(nb::init<const std::vector<PauliString<SymEngine::Expression>>&>(), "From a list of Pauli strings (equal operators are merged).")
+                .def("__init__", [](QubitHamiltonian<SymEngine::Expression>* self, const std::vector<AnyString<SymEngine::Expression>>& data) {
+                                new (self) QubitHamiltonian<SymEngine::Expression>(dense_strings(data));
+                        }, nb::arg("data"), "From a list of Pauli strings, sparse ones or mixed (equal operators are merged).")
                 .def(nb::init<const Hamiltonian_structure<SymEngine::Expression>&>(), "From a list of (coefficient, {qubit: 'X'/'Y'/'Z'}) pairs.")
                 .def("contains", [](const QubitHamiltonian<SymEngine::Expression>& qh, const PauliString<SymEngine::Expression>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
                 .def("contains", [](const QubitHamiltonian<SymEngine::Expression>& qh, const PauliString<std::complex<double>>& ps) { return qh.contains(ps); }, nb::arg("pauli_string"), "Coefficient of the given Pauli string in the Hamiltonian (0 if absent); its own coefficient is ignored.")
@@ -722,6 +1045,13 @@ NB_MODULE(_core, m) {
                         "The operator part of a Pauli string; its coefficient is dropped.")
                 .def(nb::init<const PSS&, int>(), nb::arg("string"), nb::arg("phase") = 0,
                         "The operator part of a symbolic Pauli string; its coefficient is dropped.")
+                .def("__init__", [](unweighted_pauliString* self, const SPC& s, int phase) {
+                                new (self) unweighted_pauliString(s.to_dense(), phase);
+                        }, nb::arg("string"), nb::arg("phase") = 0, "The operator part of a sparse Pauli string; its coefficient is dropped.")
+                .def("__init__", [](unweighted_pauliString* self, const SPS& s, int phase) {
+                                new (self) unweighted_pauliString(s.to_dense(), phase);
+                        }, nb::arg("string"), nb::arg("phase") = 0,
+                        "The operator part of a symbolic sparse Pauli string; its coefficient is dropped.")
                 .def_prop_ro("phase", &unweighted_pauliString::phase, "Exponent k of the phase i**k, in {0, 1, 2, 3}.")
                 .def_prop_ro("phase_factor", &unweighted_pauliString::phase_factor, "The phase i**k as a complex number.")
                 .def_prop_ro("x", [](const unweighted_pauliString& s) { return s.x.to_vector(); }, "x bits as 64-bit words (bit q set for X or Z on qubit q).")
@@ -764,7 +1094,7 @@ NB_MODULE(_core, m) {
 
 
         // Set of Pauli strings with one phase per element, for Lie algebras
-        auto cls_uq = nb::class_<unweighted_QubitHamiltonian>(m, "unweighted_QubitHamiltonian",
+        auto cls_uq = nb::class_<unweighted_QubitHamiltonian>(m, "unweighted_PauliStringSum",
                 "An ordered set of Pauli operators with one phase i**k per element. Use it only as the basis of a Lie algebra. "
                 "It is not a linear combination: every operator occurs once and the first phase seen for it wins, so A + A == A. "
                 "An element keeps its index.")
@@ -773,6 +1103,10 @@ NB_MODULE(_core, m) {
                         "From a list of strings; later duplicates of an operator are ignored.")
                 .def(nb::init<const QHC&>(), nb::arg("hamiltonian"), "The operators of a Hamiltonian with phase 0; its coefficients are dropped.")
                 .def(nb::init<const QHS&>(), nb::arg("hamiltonian"), "The operators of a symbolic Hamiltonian with phase 0; its coefficients are dropped.")
+                .def("__init__", [](unweighted_QubitHamiltonian* self, const SQC& h) { new (self) unweighted_QubitHamiltonian(h.to_dense()); },
+                        nb::arg("hamiltonian"), "The operators of a sparse sum with phase 0; its coefficients are dropped.")
+                .def("__init__", [](unweighted_QubitHamiltonian* self, const SQS& h) { new (self) unweighted_QubitHamiltonian(h.to_dense()); },
+                        nb::arg("hamiltonian"), "The operators of a symbolic sparse sum with phase 0; its coefficients are dropped.")
                 .def("__len__", &unweighted_QubitHamiltonian::size, "Number of elements.")
                 .def("size", &unweighted_QubitHamiltonian::size, "Number of elements.")
                 .def("insert", &unweighted_QubitHamiltonian::insert, nb::arg("term"),
@@ -782,20 +1116,20 @@ NB_MODULE(_core, m) {
                 .def("index", [](const unweighted_QubitHamiltonian& h, const unweighted_pauliString& term) {
                                 const std::optional<size_t> i = h.find(term);
                                 if (!i) {
-                                        throw nb::value_error("unweighted_QubitHamiltonian: operator is not present");
+                                        throw nb::value_error("unweighted_PauliStringSum: operator is not present");
                                 }
                                 return *i;
                         }, nb::arg("term"), "Index of the operator of the string; raises ValueError if it is not present.")
                 .def("__getitem__", [](const unweighted_QubitHamiltonian& h, Py_ssize_t index) {
                                 const Py_ssize_t n = static_cast<Py_ssize_t>(h.size());
                                 if (index < -n || index >= n) {
-                                        throw nb::index_error("unweighted_QubitHamiltonian: index out of range");
+                                        throw nb::index_error("unweighted_PauliStringSum: index out of range");
                                 }
                                 return h.terms()[static_cast<size_t>(index < 0 ? index + n : index)];
                         }, nb::arg("index"), "The element with the given index.")
                 .def("__iter__", [](const unweighted_QubitHamiltonian& h) { return nb::iter(nb::cast(h.terms())); }, "Iterate over the elements in insertion order.")
                 .def("terms", &unweighted_QubitHamiltonian::terms, "All elements in insertion order.")
-                .def("paulistrings", &unweighted_QubitHamiltonian::terms, "All elements in insertion order, as QubitHamiltonian.paulistrings().")
+                .def("paulistrings", &unweighted_QubitHamiltonian::terms, "All elements in insertion order, as PauliStringSum.paulistrings().")
                 .def("__add__", &unweighted_QubitHamiltonian::operator+, "Union: the elements of self, then the new ones of other.")
                 .def("__iadd__", [](unweighted_QubitHamiltonian& h, const unweighted_QubitHamiltonian& other) -> unweighted_QubitHamiltonian& {
                                 h += other;
@@ -805,9 +1139,9 @@ NB_MODULE(_core, m) {
                 .def("commutator", &unweighted_QubitHamiltonian::commutator, nb::arg("other"),
                         "The set of commutators without their factor 2: a * b for every anti-commuting pair.")
                 .def("__eq__", &unweighted_QubitHamiltonian::operator==, "Equal sets with equal phases, whatever the order of the elements is.")
-                .def("to_qubit_hamiltonian", [](const unweighted_QubitHamiltonian& h, std::complex<double> coeff) { return h.to_qubit_hamiltonian(coeff); },
+                .def("to_pauli_string_sum", [](const unweighted_QubitHamiltonian& h, std::complex<double> coeff) { return h.to_qubit_hamiltonian(coeff); },
                         nb::arg("coeff") = std::complex<double>(1.0, 0.0), "The ordinary Hamiltonian with coefficient coeff * i**k on every element.")
-                .def("to_qubit_hamiltonian", [](const unweighted_QubitHamiltonian& h, const std::string& coeff) { return h.to_qubit_hamiltonian(SymEngine::Expression(coeff)); },
+                .def("to_pauli_string_sum", [](const unweighted_QubitHamiltonian& h, const std::string& coeff) { return h.to_qubit_hamiltonian(SymEngine::Expression(coeff)); },
                         nb::arg("coeff"), "The symbolic Hamiltonian with coefficient coeff * i**k on every element; coeff is parsed like 'a*b'.");
 
         // PauliCycle and PauliCycleSum, with complex or symbolic coefficients
@@ -835,8 +1169,8 @@ NB_MODULE(_core, m) {
                         "0 <= n_qubits <= max_qubits, p, q, r >= 0 and p + q + r <= n_qubits.")
                 .def("identities", &PauliOrbit::identities, "Number of identity sites, n - p - q - r.")
                 .def("is_valid", &PauliOrbit::is_valid, "Whether p, q, r >= 0 and p + q + r <= n_qubits; always True, since the constructor rejects anything else.")
-                .def("to_qubit_hamiltonian", &PauliOrbit::to_qubit_hamiltonian,
-                        "The orbit expanded into a QubitHamiltonian, (i / n_terms) * sum of its Pauli strings. "
+                .def("to_pauli_string_sum", &PauliOrbit::to_qubit_hamiltonian,
+                        "The orbit expanded into a PauliStringSum, (i / n_terms) * sum of its Pauli strings. "
                         "Raises an error above 2e7 strings.")
                 .def("n_terms", &PauliOrbit::n_terms, "Number of distinct Pauli strings in the orbit, n! / (p! q! r! (n-p-q-r)!) (Eq. 52).")
                 .def("commutator", &PauliOrbit::commutator, nb::arg("other"),
@@ -883,6 +1217,18 @@ NB_MODULE(_core, m) {
                 "A weighted sum of Pauli orbits with symbolic coefficients, sum_i coeffs[i] * data[i], on a fixed "
                 "number of qubits.");
 
+        // Sparse Pauli strings and Hamiltonians (SparsePauliString.h, SparsePauliStringSum.h)
+        auto cls_spc = bind_sparse_string<std::complex<double>>(m, "SparsePauliStringComplex",
+                "A Pauli string with a complex coefficient, stored as the sorted list of its non-identity sites. "
+                "Costs grow with the weight instead of the highest qubit; meant for low-weight strings on many qubits.");
+        auto cls_sps = bind_sparse_string<SymEngine::Expression>(m, "SparsePauliStringSymbolic",
+                "A Pauli string with a symbolic coefficient, stored as the sorted list of its non-identity sites.");
+        auto cls_sqc = bind_sparse_hamiltonian<std::complex<double>>(m, "SparsePauliStringSumComplex",
+                "A sum of sparse Pauli strings with complex coefficients. Products, commutators and squares cost "
+                "O(w) per pair of terms of weight w instead of O(n / 64) words. Kept compacted.");
+        auto cls_sqs = bind_sparse_hamiltonian<SymEngine::Expression>(m, "SparsePauliStringSumSymbolic",
+                "A sum of sparse Pauli strings with symbolic coefficients. Kept compacted.");
+
         // Scaling cycles and orbits by an int or float.
         bind_scale_ops<CYC>(cls_cy, "The cycle with its coefficient scaled by an int, float or complex number.");
         bind_scale_ops<CYS>(cls_cys_sym, "The cycle with its coefficient scaled by an int, float or complex number.");
@@ -894,6 +1240,10 @@ NB_MODULE(_core, m) {
                 "scale * self as a PauliOrbitSum, for an int, float or complex number; scaling by 0 gives the empty sum.");
         bind_scale_ops<OSC>(cls_ors,
                 "The sum with every coefficient scaled by an int, float or complex number; scaling by 0 gives the empty sum.");
+        bind_scale_ops<SPC>(cls_spc, "The string with its coefficient scaled by an int, float or complex number.");
+        bind_scale_ops<SPS>(cls_sps, "The string with its coefficient scaled by an int, float or complex number.");
+        bind_scale_ops<SQC>(cls_sqc, "Every coefficient scaled by an int, float or complex number; scaling by 0 gives the zero operator.");
+        bind_scale_ops<SQS>(cls_sqs, "Every coefficient scaled by an int, float or complex number; scaling by 0 gives the zero operator.");
         bind_scale_ops<OSS>(cls_oss,
                 "The sum with every coefficient scaled by an int, float or complex number; scaling by 0 gives the empty sum.");
 
@@ -928,6 +1278,47 @@ NB_MODULE(_core, m) {
                 nb::arg("matrix"), nb::arg("threshold") = 0.0,
                 "Pauli decomposition of a 2**n x 2**n matrix given as a list of rows.");
 
+        // Methods that do not depend on the representation exist on both sides, so
+        // that code works whether the factories chose bit vectors or sparse sites.
+        cls_sqc.def_static("from_matrix",
+                [](nb::ndarray<const std::complex<double>, nb::ndim<2>, nb::c_contig, nb::device::cpu> m,
+                   double threshold) {
+                        if (m.shape(0) != m.shape(1)) {
+                                throw std::invalid_argument("from_matrix: the matrix must be square");
+                        }
+                        const size_t dim = m.shape(0);
+                        std::vector<std::complex<double>> data(m.data(), m.data() + dim * dim);
+                        return SQC(pauli_decomposition(std::move(data), dim, threshold));
+                }, nb::arg("matrix"), nb::arg("threshold") = 0.0,
+                "Pauli decomposition of a 2**n x 2**n matrix, as PauliStringSumComplex.from_matrix, stored sparse.");
+        cls_sqc.def_static("from_matrix",
+                [](const Matrix2D& m, double threshold) { return SQC(pauli_decomposition(m, threshold)); },
+                nb::arg("matrix"), nb::arg("threshold") = 0.0,
+                "Pauli decomposition of a 2**n x 2**n matrix given as a list of rows, stored sparse.");
+        cls_qhc.def("square", [](const QHC& h) { return h.square(); }, "self * self, visiting each commuting pair once.");
+        cls_qhs.def("square", [](const QHS& h) { return h.square(); }, "self * self, visiting each commuting pair once.");
+        cls_psc.def("anticommutes", [](const PSC& a, const PSC& b) {
+                        return pauliengine_detail::anticommute_words(a.x.data(), a.y.data(), a.x.size(),
+                                                                     b.x.data(), b.y.data(), b.x.size());
+                }, nb::arg("other"), "True if the strings anti-commute.");
+        cls_pss.def("anticommutes", [](const PSS& a, const PSS& b) {
+                        return pauliengine_detail::anticommute_words(a.x.data(), a.y.data(), a.x.size(),
+                                                                     b.x.data(), b.y.data(), b.x.size());
+                }, nb::arg("other"), "True if the strings anti-commute.");
+        cls_spc.def_static("from_hash", [](const nb::int_& hash, std::complex<double> coeff) {
+                        return SPC(PSC::from_hash(hash_int_to_limbs(hash), coeff));
+                }, nb::arg("hash"), nb::arg("coeff") = std::complex<double>(1.0, 0.0),
+                "Build the sparse Pauli string whose get_hash() equals hash, with the given coefficient.");
+        cls_sps.def_static("from_hash", [](const nb::int_& hash, const SymEngine::Expression& coeff) {
+                        return SPS(PSS::from_hash(hash_int_to_limbs(hash), coeff));
+                }, nb::arg("hash"), nb::arg("coeff"),
+                "Build the sparse Pauli string whose get_hash() equals hash, with the given coefficient.");
+        cls_sps.def_static("from_hash", [](const nb::int_& hash) {
+                        return SPS(PSS::from_hash(hash_int_to_limbs(hash), SymEngine::Expression(1)));
+                }, nb::arg("hash"), "Build the sparse Pauli string whose get_hash() equals hash, with coefficient 1.");
+        cls_sps.def_static("to_complex", nb::overload_cast<const Expression&>(&PSS::to_complex),
+                "Evaluate a fully numeric Expression to a complex number; raises RuntimeError if it still contains symbols.");
+
         // Arithmetic and inner products between all representations (Arithmetic.h).
         // Pairs that the class binds itself above are left out (see own_add etc.).
         bind_arithmetic<PSC>(cls_psc, AllOperators{});
@@ -941,6 +1332,10 @@ NB_MODULE(_core, m) {
         bind_arithmetic<PauliOrbit>(cls_or, AllOperators{});
         bind_arithmetic<OSC>(cls_ors, AllOperators{});
         bind_arithmetic<OSS>(cls_oss, AllOperators{});
+        bind_arithmetic<SPC>(cls_spc, AllOperators{});
+        bind_arithmetic<SPS>(cls_sps, AllOperators{});
+        bind_arithmetic<SQC>(cls_sqc, AllOperators{});
+        bind_arithmetic<SQS>(cls_sqs, AllOperators{});
 
         // Unweighted strings and sets with every other kind of operator (Arithmetic.h).
         using UPS = unweighted_pauliString;
@@ -967,6 +1362,14 @@ NB_MODULE(_core, m) {
         bind_unweighted_pair<PauliOrbit, UQH>(cls_or, cls_uq);
         bind_unweighted_pair<OSC, UQH>(cls_ors, cls_uq);
         bind_unweighted_pair<OSS, UQH>(cls_oss, cls_uq);
+        bind_unweighted_pair<SPC, UPS>(cls_spc, cls_up);
+        bind_unweighted_pair<SPS, UPS>(cls_sps, cls_up);
+        bind_unweighted_pair<SQC, UPS>(cls_sqc, cls_up);
+        bind_unweighted_pair<SQS, UPS>(cls_sqs, cls_up);
+        bind_unweighted_pair<SPC, UQH>(cls_spc, cls_uq);
+        bind_unweighted_pair<SPS, UQH>(cls_sps, cls_uq);
+        bind_unweighted_pair<SQC, UQH>(cls_sqc, cls_uq);
+        bind_unweighted_pair<SQS, UQH>(cls_sqs, cls_uq);
         // A string and a set: the string counts as a set with one element. There is no
         // difference of sets, so only + and * are defined.
         cls_uq.def("__add__", [](const UQH& h, const UPS& s) { return h + s; },
@@ -1002,6 +1405,10 @@ NB_MODULE(_core, m) {
         bind_division<OSS>(cls_oss, same);
         bind_division<UPS>(cls_up, weighted);
         bind_division<UQH>(cls_uq, weighted);
+        bind_division<SPC>(cls_spc, same);
+        bind_division<SPS>(cls_sps, same);
+        bind_division<SQC>(cls_sqc, same);
+        bind_division<SQS>(cls_sqs, same);
         bind_symbolic_scale<PSC>(cls_psc);
         bind_symbolic_scale<PSS>(cls_pss);
         bind_symbolic_scale<QHC>(cls_qhc);
@@ -1015,6 +1422,10 @@ NB_MODULE(_core, m) {
         bind_symbolic_scale<OSS>(cls_oss);
         bind_symbolic_scale<UPS>(cls_up);
         bind_symbolic_scale<UQH>(cls_uq);
+        bind_symbolic_scale<SPC>(cls_spc);
+        bind_symbolic_scale<SPS>(cls_sps);
+        bind_symbolic_scale<SQC>(cls_sqc);
+        bind_symbolic_scale<SQS>(cls_sqs);
 
         // Two unweighted operators: inner product of their weighted forms; -set.
         const char* unweighted_ip = "Normalized Hilbert-Schmidt inner product; both count with coefficient 1.0 * i**phase.";
@@ -1061,6 +1472,46 @@ NB_MODULE(_core, m) {
         cls_css.attr("__hash__") = nb::none();
         cls_ors.attr("__hash__") = nb::none();
         cls_oss.attr("__hash__") = nb::none();
+        // Sparse operators compare by value with sparse ones and with Pauli strings or
+        // Hamiltonians of the same kind (string with string, sum with sum).
+        const auto same_string = [](const auto& a, const auto& b) {
+                using R = pauliengine_detail::promoted_coeff_t<std::decay_t<decltype(a)>, std::decay_t<decltype(b)>>;
+                return pauliengine_detail::as_sparse_string<R>(a) == pauliengine_detail::as_sparse_string<R>(b);
+        };
+        const auto same_operator = [](const auto& a, const auto& b) {
+                using R = pauliengine_detail::promoted_coeff_t<std::decay_t<decltype(a)>, std::decay_t<decltype(b)>>;
+                return pauliengine_detail::as_sparse<R>(a) == pauliengine_detail::as_sparse<R>(b);
+        };
+        bind_eq<SPC, SPC>(cls_spc, same_string, ps_eq);
+        bind_eq<SPC, SPS>(cls_spc, same_string, ps_eq);
+        bind_eq<SPC, PSC>(cls_spc, same_string, ps_eq);
+        bind_eq<SPC, PSS>(cls_spc, same_string, ps_eq);
+        bind_eq<SPS, SPS>(cls_sps, same_string, ps_eq);
+        bind_eq<SPS, SPC>(cls_sps, same_string, ps_eq);
+        bind_eq<SPS, PSC>(cls_sps, same_string, ps_eq);
+        bind_eq<SPS, PSS>(cls_sps, same_string, ps_eq);
+        bind_eq<PSC, SPC>(cls_psc, same_string, ps_eq);
+        bind_eq<PSC, SPS>(cls_psc, same_string, ps_eq);
+        bind_eq<PSS, SPC>(cls_pss, same_string, ps_eq);
+        bind_eq<PSS, SPS>(cls_pss, same_string, ps_eq);
+        bind_eq<SQC, SQC>(cls_sqc, same_operator, qh_eq);
+        bind_eq<SQC, SQS>(cls_sqc, same_operator, qh_eq);
+        bind_eq<SQC, QHC>(cls_sqc, same_operator, qh_eq);
+        bind_eq<SQC, QHS>(cls_sqc, same_operator, qh_eq);
+        bind_eq<SQS, SQS>(cls_sqs, same_operator, qh_eq);
+        bind_eq<SQS, SQC>(cls_sqs, same_operator, qh_eq);
+        bind_eq<SQS, QHC>(cls_sqs, same_operator, qh_eq);
+        bind_eq<SQS, QHS>(cls_sqs, same_operator, qh_eq);
+        bind_eq<QHC, SQC>(cls_qhc, same_operator, qh_eq);
+        bind_eq<QHC, SQS>(cls_qhc, same_operator, qh_eq);
+        bind_eq<QHS, SQC>(cls_qhs, same_operator, qh_eq);
+        bind_eq<QHS, SQS>(cls_qhs, same_operator, qh_eq);
+        cls_sqc.attr("__hash__") = nb::none();
+        cls_sqs.attr("__hash__") = nb::none();
+        bind_eq_fallback<SPC>(cls_spc);
+        bind_eq_fallback<SPS>(cls_sps);
+        bind_eq_fallback<SQC>(cls_sqc);
+        bind_eq_fallback<SQS>(cls_sqs);
         bind_eq_fallback<PSC>(cls_psc);
         bind_eq_fallback<PSS>(cls_pss);
         bind_eq_fallback<QHC>(cls_qhc);
@@ -1077,4 +1528,13 @@ NB_MODULE(_core, m) {
         // numpy scalars on the left: let Python call __rmul__ instead of numpy
         // treating the set as a sequence.
         cls_uq.attr("__array_ufunc__") = nb::none();
+        // Old Python names (QubitHamiltonian...) stay available as aliases.
+        for (const char* name : {"Complex", "Symbolic"}) {
+                m.attr((std::string("QubitHamiltonian") + name).c_str()) = m.attr((std::string("PauliStringSum") + name).c_str());
+        }
+        m.attr("unweighted_QubitHamiltonian") = m.attr("unweighted_PauliStringSum");
+        for (nb::handle cls : {nb::handle(cls_cy), nb::handle(cls_cys_sym), nb::handle(cls_cys), nb::handle(cls_css),
+                               nb::handle(cls_or), nb::handle(cls_ors), nb::handle(cls_oss), nb::handle(cls_uq)}) {
+                nb::setattr(cls, "to_qubit_hamiltonian", nb::getattr(cls, "to_pauli_string_sum"));
+        }
 }
