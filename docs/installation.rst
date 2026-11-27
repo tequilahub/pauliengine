@@ -14,14 +14,11 @@ Windows (x86_64/arm64) on Python 3.10–3.13.
 From source
 -----------
 
-Building from source needs a C++20 compiler (MSVC 19.3+, GCC 11+ or Clang 14+),
-CMake 3.20+ and `Conan 2 <https://conan.io>`_, which provides SymEngine:
+Building from source needs a C++20 compiler (MSVC 19.3+, GCC 11+ or Clang 14+)
+and CMake 3.20+. There are no C++ libraries to install beforehand:
 
 .. code-block:: bash
 
-   pip install conan
-   conan profile detect
-   conan install . --output-folder=build --build=missing
    pip install .
 
 Use ``pip install -e .`` for an editable development install.

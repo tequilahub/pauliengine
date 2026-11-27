@@ -127,7 +127,7 @@ class SparsePauliString {
                 if constexpr (std::is_same_v<Coeff, std::complex<double>>) {
                         oss << std::to_string(coeff.real()) << " + " << std::to_string(coeff.imag()) << "i : ";
                 } else {
-                        oss << SymEngine::str(*coeff.get_basic()) << " : ";
+                        oss << coeff.str() << " : ";
                 }
                 for (Site s : sites) {
                         oss << pauliengine_detail::pauli_letter(pauliengine_detail::site_pauli(s)) << "("
@@ -210,8 +210,9 @@ class SparsePauliString {
                 return out;
         }
 
-        /// Values substituted for symbols of the coefficient.
-        SparsePauliString substitute(const pauliengine_detail::SymbolValues& values) const {
+        /// Values or polynomials substituted for symbols of the coefficient.
+        template <typename Values>
+        SparsePauliString substitute(const Values& values) const {
                 SparsePauliString out = *this;
                 out.coeff = pauliengine_detail::coeff_subs(coeff, values);
                 return out;

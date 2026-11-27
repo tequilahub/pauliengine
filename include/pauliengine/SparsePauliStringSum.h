@@ -390,9 +390,12 @@ class SparsePauliStringSum {
                 return out.filtered([](const Coeff& c) { return !pauliengine_detail::coeff_is_zero(c); });
         }
 
-        SparsePauliStringSum substitute(const pauliengine_detail::SymbolValues& values) const {
+        /// Values or polynomials substituted for symbols of every coefficient.
+        template <typename Values>
+        SparsePauliStringSum substitute(const Values& values) const {
+                const auto prepared = Coeff::prepare_subs(values);
                 SparsePauliStringSum out = mapped_coeffs([&](size_t, const Coeff& c) {
-                        return pauliengine_detail::coeff_subs(c, values);
+                        return pauliengine_detail::coeff_subs(c, prepared);
                 });
                 return out.filtered([](const Coeff& c) { return !pauliengine_detail::coeff_is_zero(c); });
         }

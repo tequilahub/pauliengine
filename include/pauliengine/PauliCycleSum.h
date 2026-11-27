@@ -25,7 +25,7 @@ class PauliCycle;
 /// (in its base string); there is no separate global prefactor. The sum is kept
 /// merged: no two summands describe the same rotation orbit, and summands whose
 /// coefficient cancelled to zero are dropped. Coeff is std::complex<double> or
-/// SymEngine::Expression.
+/// symbolic::Expression.
 template <typename Coeff>
 class PauliCycleSum {
         public:
@@ -72,11 +72,14 @@ class PauliCycleSum {
                         return PauliCycleSum(std::move(terms));
                 }
 
-                /// The sum with values substituted for symbols; summands that become zero are dropped.
-                PauliCycleSum substitute(const pauliengine_detail::SymbolValues& values) const {
+                /// The sum with values or polynomials substituted for symbols; summands
+                /// that become zero are dropped.
+                template <typename Values>
+                PauliCycleSum substitute(const Values& values) const {
+                        const auto prepared = Coeff::prepare_subs(values);
                         std::vector<PauliCycle<Coeff>> terms;
                         terms.reserve(data.size());
-                        for (const auto& c : data) terms.push_back(c.substitute(values));
+                        for (const auto& c : data) terms.push_back(c.substitute(prepared));
                         return PauliCycleSum(std::move(terms));
                 }
 

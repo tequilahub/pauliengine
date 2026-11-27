@@ -11,8 +11,43 @@ Symmetry-adapted operator bases from arXiv:2604.16701 (Pauli cycles and Pauli
 orbits), arithmetic and inner products between all representations, and the
 Pauli decomposition of matrices.
 
+### Removed
+
+- **SymEngine, GMP and Conan are no longer needed.** Symbolic coefficients are now
+  PauliEngine's own header-only polynomials (`include/pauliengine/Polynomial.h`,
+  `pauliengine::symbolic::Expression`): sums of monomials in named symbols with
+  `complex<double>` coefficients, always in canonical form. A source build only needs
+  a C++20 compiler and CMake; `conanfile.txt`, `conan_profile` and the Conan steps in CI
+  and the devcontainer are gone.
+
 ### Added
 
+- **Own polynomial coefficients** (replacing SymEngine): `pe.Expression` parses texts
+  such as `"2*a*b + 3"`, `"a**2 - b/4"`, `"2a"` or `"(1 + 2*I)*c"` and supports `+`, `-`,
+  `*`, `**`, `==`, `diff`, `subs`, `conjugate`, `free_symbols`, `is_zero`, `is_number`
+  and `complex(...)`. `str()` is read back exactly by the parser. Expressions share no
+  state, so symbolic products, commutators, compaction, `diff`, `subs` and `dagger` now
+  run in parallel with OpenMP like the complex ones.
+  Products and commutators of symbolic Hamiltonians work on flat records (operator,
+  monomial packed into 64 bits) -> complex number and share the parallel sort and merge
+  of the complex path; they fall back to term-by-term polynomial arithmetic if the
+  monomials of a product need more than 64 bits. Monomials are ordered
+  lexicographically with the newest symbol most significant, constant term first.
+- **Polynomials in `subs`**: `subs({"a": "b + 2*c", "x": 0.5})` puts in polynomials,
+  given as text or as `Expression`, next to numbers, for expressions and every symbolic
+  operator (strings, sums, sparse classes, cycles, orbit sums). All symbols are replaced
+  at once (`{"a": "b", "b": "a"}` swaps them); a complex symbol's `conjugate(z)` gets the
+  conjugated polynomial. C++: `substitute` takes a `std::unordered_map<std::string,
+  Expression>` as well, and `Expression::prepare_subs` prepares it once for many
+  coefficients.
+- **Conjugation flag**: `dagger()`, `conjugate()` and conjugate-linear inner products
+  turn a symbol `a` into `conjugate(a)`, a flag that `a` was conjugated; `subs({"a": v})`
+  puts `conj(v)` (or the conjugated polynomial) in there, so the result is right whether
+  the value put in later is real or complex. `diff("a")` differentiates `conjugate(a)`
+  like `a`. `pe.set_symbol_real("a")` keeps `a` unchanged under conjugation (a Hermitian
+  sum with real symbols equals its dagger), `pe.set_symbol_complex("a")` makes `a` and
+  `conjugate(a)` independent for `diff` (Wirtinger derivatives); `pe.is_symbol_real` /
+  `pe.is_symbol_complex` tell the declaration.
 - **Sparse Pauli strings and Hamiltonians** for low-weight operators on many qubits:
   `SparsePauliStringComplex`/`Symbolic` and `SparsePauliStringSumComplex`/`Symbolic`
   store only the non-identity sites (4 bytes each) instead of bit vectors up to the
@@ -158,6 +193,13 @@ Pauli decomposition of matrices.
 - `numpy_scalar * unweighted_QubitHamiltonian` gives a `QubitHamiltonian` instead of a numpy array.
 - `PauliOrbit.targeted_commutator` checks the Y column of the overlap table before its
   innermost loop, so heavy targets cost O(n^6) instead of O(n^7).
+- **Symbolic coefficients are polynomials only.** Division by symbols, non-integer or
+  negative powers of symbols and functions such as `sin` raise `ValueError` when parsed.
+- `conjugate(a)` of a symbol is a symbol of its own, `conjugate(a)`, that `subs` and
+  `diff` know about (see "Conjugation flag"); SymEngine kept an unevaluated function.
+- Symbolic zero tests and comparisons need no expansion any more: polynomials are
+  canonical, so equal coefficients are equal term by term.
+
 - `pe.PauliString()`, `pe.PauliString("a")` and other calls without a coefficient no longer
   give a zero string or a symbolic multiple of the identity, see the Pauli strings above.
   Use `pe.PauliString("a", {})` for the latter.
@@ -193,8 +235,9 @@ Pauli decomposition of matrices.
 - Commutators of complex `QubitHamiltonian`s with strings beyond 512 qubits and few
   anti-commuting pairs no longer reserve memory for all `n1 * n2` pairs, which made
   large ones fail; memory now follows the pairs found. Results are unchanged.
-- Symbolic `QubitHamiltonian` products, commutators and squares group pairs by operator
-  first, so each pair costs one SymEngine product.
+- Symbolic `QubitHamiltonian` squares, and products and commutators whose monomials do
+  not fit the packed records, group pairs by operator first, so each pair costs one
+  polynomial product and each operator one merged sum.
 - `unweighted_QubitHamiltonian` products and commutators use the prefix-partitioned
   product with several threads; elements, order and phases are unchanged.
 - Faster `PauliCycle` commutators and products, much faster for dense bases. Merging
@@ -243,6 +286,9 @@ Pauli decomposition of matrices.
 
 ### Fixed
 
+- `pe.PauliStringSum([(0.5, "XI"), ...])` with operators as text, and lists that mix
+  `(coeff, operators)` tuples with Pauli strings, raised `TypeError` unless the sum
+  became sparse.
 - `PauliString.qubits()` returned 64 zeros (plus all indices 0..63 if qubit 0
   was occupied) instead of the qubits with a non-identity operator.
 - `PauliString.key_openfermion()` prepended 64 invalid `('\x00', 0)` entries.

@@ -96,7 +96,7 @@ QubitHamiltonian<C> as_hamiltonian(const PauliOrbitSum<C>& s) {
 namespace pauliengine_detail {
 
 using Complex = std::complex<double>;
-using Symbolic = SymEngine::Expression;
+using Symbolic = pauliengine::symbolic::Expression;
 
 template <typename C>
 C coeff_of(const QubitHamiltonian<C>&);
@@ -466,7 +466,7 @@ auto commutator(const A& a, const B& b) {
 namespace pauliengine_detail {
 
 inline Complex conj_coeff(const Complex& c) { return std::conj(c); }
-inline Symbolic conj_coeff(const Symbolic& c) { return Symbolic(SymEngine::conjugate(c.get_basic())); }
+inline Symbolic conj_coeff(const Symbolic& c) { return c.conjugate(); }
 
 /// Hash of a Pauli string's operator part, independent of the coefficient type.
 struct OperatorKeyHash {
@@ -742,69 +742,69 @@ std::complex<double> inner_product(const A& a, const B& b) { return inner_produc
 // coefficient becomes zero are dropped.
 
 template <typename C>
-PauliString<SymEngine::Expression> scaled_by(const PauliString<C>& a, const SymEngine::Expression& e) {
-        return PauliString<SymEngine::Expression>(a.x, a.y, SymEngine::Expression(a.coeff) * e);
+PauliString<pauliengine::symbolic::Expression> scaled_by(const PauliString<C>& a, const pauliengine::symbolic::Expression& e) {
+        return PauliString<pauliengine::symbolic::Expression>(a.x, a.y, pauliengine::symbolic::Expression(a.coeff) * e);
 }
 
 template <typename C>
-QubitHamiltonian<SymEngine::Expression> scaled_by(const QubitHamiltonian<C>& h, const SymEngine::Expression& e) {
-        std::vector<PauliString<SymEngine::Expression>> terms;
+QubitHamiltonian<pauliengine::symbolic::Expression> scaled_by(const QubitHamiltonian<C>& h, const pauliengine::symbolic::Expression& e) {
+        std::vector<PauliString<pauliengine::symbolic::Expression>> terms;
         terms.reserve(h.size());
         for (const auto& ps : h.terms()) terms.push_back(scaled_by(ps, e));
-        return QubitHamiltonian<SymEngine::Expression>(std::move(terms));
+        return QubitHamiltonian<pauliengine::symbolic::Expression>(std::move(terms));
 }
 
 template <typename C>
-PauliCycle<SymEngine::Expression> scaled_by(const PauliCycle<C>& c, const SymEngine::Expression& e) {
-        PauliCycle<SymEngine::Expression> out = pauliengine_detail::convert_cycle<SymEngine::Expression>(c);
+PauliCycle<pauliengine::symbolic::Expression> scaled_by(const PauliCycle<C>& c, const pauliengine::symbolic::Expression& e) {
+        PauliCycle<pauliengine::symbolic::Expression> out = pauliengine_detail::convert_cycle<pauliengine::symbolic::Expression>(c);
         out.Base.coeff = out.Base.coeff * e;
         return out;
 }
 
 template <typename C>
-PauliCycleSum<SymEngine::Expression> scaled_by(const PauliCycleSum<C>& s, const SymEngine::Expression& e) {
-        std::vector<PauliCycle<SymEngine::Expression>> terms;
+PauliCycleSum<pauliengine::symbolic::Expression> scaled_by(const PauliCycleSum<C>& s, const pauliengine::symbolic::Expression& e) {
+        std::vector<PauliCycle<pauliengine::symbolic::Expression>> terms;
         terms.reserve(s.data.size());
         for (const auto& c : s.data) terms.push_back(scaled_by(c, e));
-        return PauliCycleSum<SymEngine::Expression>(std::move(terms));
+        return PauliCycleSum<pauliengine::symbolic::Expression>(std::move(terms));
 }
 
-inline PauliOrbitSum<SymEngine::Expression> scaled_by(const PauliOrbit& o, const SymEngine::Expression& e) {
-        PauliOrbitSum<SymEngine::Expression> out(o.n_qubits);
+inline PauliOrbitSum<pauliengine::symbolic::Expression> scaled_by(const PauliOrbit& o, const pauliengine::symbolic::Expression& e) {
+        PauliOrbitSum<pauliengine::symbolic::Expression> out(o.n_qubits);
         out.add(o, e);
         out.prune_zeros();
         return out;
 }
 
 template <typename C>
-PauliOrbitSum<SymEngine::Expression> scaled_by(const PauliOrbitSum<C>& s, const SymEngine::Expression& e) {
-        PauliOrbitSum<SymEngine::Expression> out(s.n_qubits);
-        for (size_t k = 0; k < s.data.size(); ++k) out.add(s.data[k], SymEngine::Expression(s.coeffs[k]) * e);
+PauliOrbitSum<pauliengine::symbolic::Expression> scaled_by(const PauliOrbitSum<C>& s, const pauliengine::symbolic::Expression& e) {
+        PauliOrbitSum<pauliengine::symbolic::Expression> out(s.n_qubits);
+        for (size_t k = 0; k < s.data.size(); ++k) out.add(s.data[k], pauliengine::symbolic::Expression(s.coeffs[k]) * e);
         out.prune_zeros();
         return out;
 }
 
-inline PauliString<SymEngine::Expression> scaled_by(const unweighted_pauliString& s, const SymEngine::Expression& e) {
+inline PauliString<pauliengine::symbolic::Expression> scaled_by(const unweighted_pauliString& s, const pauliengine::symbolic::Expression& e) {
         return s.to_pauli_string(e);
 }
 
-inline QubitHamiltonian<SymEngine::Expression> scaled_by(const unweighted_QubitHamiltonian& h, const SymEngine::Expression& e) {
+inline QubitHamiltonian<pauliengine::symbolic::Expression> scaled_by(const unweighted_QubitHamiltonian& h, const pauliengine::symbolic::Expression& e) {
         return h.to_qubit_hamiltonian(e);
 }
 
 template <typename C>
-SparsePauliString<SymEngine::Expression> scaled_by(const SparsePauliString<C>& a, const SymEngine::Expression& e) {
-        SparsePauliString<SymEngine::Expression> out(SymEngine::Expression(a.coeff) * e);
+SparsePauliString<pauliengine::symbolic::Expression> scaled_by(const SparsePauliString<C>& a, const pauliengine::symbolic::Expression& e) {
+        SparsePauliString<pauliengine::symbolic::Expression> out(pauliengine::symbolic::Expression(a.coeff) * e);
         out.sites = a.sites;
         return out;
 }
 
 template <typename C>
-SparsePauliStringSum<SymEngine::Expression> scaled_by(const SparsePauliStringSum<C>& h, const SymEngine::Expression& e) {
-        pauliengine_detail::SparseTerms<SymEngine::Expression> terms;
+SparsePauliStringSum<pauliengine::symbolic::Expression> scaled_by(const SparsePauliStringSum<C>& h, const pauliengine::symbolic::Expression& e) {
+        pauliengine_detail::SparseTerms<pauliengine::symbolic::Expression> terms;
         for (size_t i = 0; i < h.size(); ++i) {
-                const SymEngine::Expression c = SymEngine::Expression(h.terms().coeffs[i]) * e;
+                const pauliengine::symbolic::Expression c = pauliengine::symbolic::Expression(h.terms().coeffs[i]) * e;
                 if (!pauliengine_detail::coeff_is_zero(c)) terms.push_back(h.terms().sites_of(i), h.terms().weight_of(i), c);
         }
-        return SparsePauliStringSum<SymEngine::Expression>::from_terms(std::move(terms));
+        return SparsePauliStringSum<pauliengine::symbolic::Expression>::from_terms(std::move(terms));
 }

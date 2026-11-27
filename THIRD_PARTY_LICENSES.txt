@@ -7,9 +7,3 @@ Copyright (c) 2022-2025 Wenzel Jakob
 License: MIT
 Source: https://github.com/wjakob/nanobind
 
----
-
-SymEngine
-Copyright (c) SymEngine Developers
-License: MIT
-Source: https://github.com/symengine/symengine

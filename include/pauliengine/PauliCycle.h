@@ -17,7 +17,7 @@
 
 
 /// Represents a Pauli string with a coefficient of type Coeff (std::complex<double>
-/// or SymEngine::Expression) together with all of its cyclic rotations on
+/// or symbolic::Expression) together with all of its cyclic rotations on
 /// `n_qubits` qubits, i.e. the operator
 ///
 ///     C(P) = coeff * sum_{k=0}^{n-1} R^k P        (R = cyclic shift by one qubit)
@@ -327,8 +327,10 @@ class PauliCycle {
                         return out;
                 }
 
-                /// The cycle with values substituted for symbols of its coefficient.
-                PauliCycle substitute(const pauliengine_detail::SymbolValues& values) const {
+                /// The cycle with values or polynomials substituted for symbols of its
+                /// coefficient (see QubitHamiltonian::substitute).
+                template <typename Values>
+                PauliCycle substitute(const Values& values) const {
                         PauliCycle out = *this;
                         out.Base.coeff = pauliengine_detail::coeff_subs(Base.coeff, values);
                         return out;

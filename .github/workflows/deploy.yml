@@ -40,7 +40,7 @@ jobs:
           fetch-depth: 0  # such that setuptools_scm can do its job correctly
 
       # On release builds, pin the version to the tag so a dirty working tree
-      # (e.g. files touched by conan install) cannot shift it to a devN version.
+      # (e.g. files touched during the build) cannot shift it to a devN version.
       - name: Pin version from release tag
         if: github.event_name == 'release'
         shell: bash
@@ -84,7 +84,7 @@ jobs:
           fetch-depth: 0
 
       # On release builds, pin the version to the tag so a dirty working tree
-      # (e.g. files touched by conan install) cannot shift it to a devN version.
+      # (e.g. files touched during the build) cannot shift it to a devN version.
       - name: Pin version from release tag
         if: github.event_name == 'release'
         shell: bash
@@ -107,25 +107,11 @@ jobs:
           CIBW_ENVIRONMENT_PASS_LINUX: SETUPTOOLS_SCM_PRETEND_VERSION_FOR_PAULIENGINE
           CIBW_BEFORE_ALL_LINUX: |
             dnf install -y ninja-build
-            # install conan and C++ dependencies for the project
-            pip install conan
-            conan profile detect --force
-
-            # install symengine
-            conan install .  --output-folder=build --build=missing -pr ./conan_profile  
-          CIBW_BEFORE_ALL_MACOS: |
-            # install conan and C++ dependencies for the project
-            pip install conan
-            conan profile detect --force 
-
-            # install symengine
-            conan install .  --output-folder=build --build=missing -pr ./conan_profile
           CIBW_BEFORE_ALL_WINDOWS: |
-            pip install delvewheel conan && conan profile detect --force && conan install . --output-folder=build --build=missing -pr conan_profile 
+            pip install delvewheel
           # do not activate architecture-dependent compiler flags
           # 4 jobs in parallel, but do not start new ones if load average exceeds 5
           CIBW_ENVIRONMENT_LINUX: 
-            CMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake
             CIBW="true"
             SKBUILD_BUILD_TOOL_ARGS="-j4;-l5"
           # set deployment target for C++20 compatibility
@@ -138,7 +124,6 @@ jobs:
           CIBW_ENVIRONMENT_WINDOWS: >
             CIBW="true"
             SKBUILD_BUILD_TOOL_ARGS="/m:4"
-            CMAKE_TOOLCHAIN_FILE=build\conan_toolchain.cmake
           # build 3.10–3.13; must stay in sync with requires-python in
           # pyproject.toml (currently <3.14, so no cp314 — cibuildwheel
           # cannot install the project into a 3.14 env and would fail)

@@ -1,11 +1,16 @@
 """PauliEngine library."""
 
 from ._core import (
+    Expression,
     __build_type__,
     __compiler_flags__,
     __openmp__,
     __omp_max_threads__,
     __omp_version__,
+    is_symbol_complex,
+    is_symbol_real,
+    set_symbol_complex,
+    set_symbol_real,
 )
 from ._version import __version__
 from .pauli_cycle import PauliCycle, PauliCycleSum
@@ -25,6 +30,7 @@ def inner_product(a, b):
     return a.inner_product(b)
 
 __all__ = [
+    "Expression",
     "PauliCycle",
     "PauliCycleSum",
     "PauliOrbit",
@@ -41,5 +47,9 @@ __all__ = [
     "from_openfermion",
     "get_sparse_threshold",
     "inner_product",
+    "is_symbol_complex",
+    "is_symbol_real",
     "set_sparse_threshold",
+    "set_symbol_complex",
+    "set_symbol_real",
 ]

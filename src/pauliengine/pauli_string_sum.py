@@ -28,11 +28,8 @@ if TYPE_CHECKING:
 
 
 def _complex_coeff_to_expression(coeff: complex) -> Expression:
-    """Convert a complex<double> coefficient to a SymEngine Expression."""
-    real, imag = coeff.real, coeff.imag
-    if imag == 0.0:
-        return Expression(repr(real))
-    return Expression(f"{real!r} + {imag!r}*I")
+    """Convert a complex<double> coefficient to a numeric Expression."""
+    return Expression(complex(coeff))
 
 
 def _to_symbolic_ps(term) -> PauliStringSymbolic:
@@ -263,9 +260,16 @@ class PauliStringSumFactory:
             return _sparse_hamiltonian(pauli_strings, arg_type is PauliStringSymbolic)
         if arg_type is PauliStringSymbolic:
             return builder([_to_symbolic_ps(t) for t in pauli_strings])
-        if any(isinstance(t, _SPARSE_STRINGS) for t in pauli_strings):
-            return builder([t.to_dense() if isinstance(t, _SPARSE_STRINGS) else t for t in pauli_strings])
-        return builder(pauli_strings)
+        if all(isinstance(t, tuple) and isinstance(t[1], dict) for t in pauli_strings):
+            return builder(pauli_strings)
+        # Strings, or tuples with operators as text or next to strings: one Pauli
+        # string per term.
+        return builder([
+            t.to_dense() if isinstance(t, _SPARSE_STRINGS)
+            else PauliStringComplex(complex(t[0]), t[1]) if isinstance(t, tuple)
+            else t
+            for t in pauli_strings
+        ])
 
     @staticmethod
     def from_openfermion(qop: Any) -> PauliStringSumComplex:

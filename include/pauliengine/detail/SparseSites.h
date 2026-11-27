@@ -228,14 +228,14 @@ Coeff phase_product(const Coeff& a, const Coeff& b, int k, double scale) {
 
 /// Complex conjugate of a coefficient.
 inline std::complex<double> conj_of(const std::complex<double>& c) { return std::conj(c); }
-inline SymEngine::Expression conj_of(const SymEngine::Expression& c) {
-        return SymEngine::Expression(SymEngine::conjugate(c.get_basic()));
+inline pauliengine::symbolic::Expression conj_of(const pauliengine::symbolic::Expression& c) {
+        return c.conjugate();
 }
 
-/// Whether two coefficients are equal (symbolic ones after expanding their difference).
+/// Whether two coefficients are equal (polynomials are canonical).
 inline bool coeff_equal_to(const std::complex<double>& a, const std::complex<double>& b) { return a == b; }
-inline bool coeff_equal_to(const SymEngine::Expression& a, const SymEngine::Expression& b) {
-        return coeff_is_zero(a - b);
+inline bool coeff_equal_to(const pauliengine::symbolic::Expression& a, const pauliengine::symbolic::Expression& b) {
+        return a == b;
 }
 
 /// std::allocator whose value-less construction leaves trivial types uninitialised,

@@ -365,6 +365,19 @@ class TestFactory:
         small = [SPC(1.0, {0: "X"}), SPC(1.0, {1: "Z"})]
         assert isinstance(pe.PauliStringSum(small), _core.PauliStringSumComplex)
 
+    def test_text_operators_and_mixed_terms(self):
+        ref = dense_qh([(1.0, {0: "Z", 1: "Z"}), (0.5, {0: "X"}), (0.5, {1: "X"})])
+        for terms in ([(1.0, {0: "Z", 1: "Z"}), (0.5, "XI"), (0.5, "X1")],
+                      [(1.0, "ZZ"), _core.PauliStringComplex(0.5, {0: "X"}), (0.5, {1: "X"})],
+                      [SPC(1.0, {0: "Z", 1: "Z"}), (0.5, "X0"), (0.5, "IX")]):
+            h = pe.PauliStringSum(terms)
+            assert isinstance(h, _core.PauliStringSumComplex)
+            assert_same(h, ref)
+        sym = pe.PauliStringSum([("a", "XI"), (0.5, "Z1")])
+        assert isinstance(sym, _core.PauliStringSumSymbolic) and len(sym) == 2
+        big = pe.PauliStringSum([(1.0, f"Z{j} Z{j + 1}") for j in range(2000)])
+        assert isinstance(big, SQC) and len(big) == 2000
+
     def test_existing_sums_follow_the_rule(self):
         chain = [(1.0, {j: "Z", j + 1: "Z"}) for j in range(2000)]
         assert isinstance(pe.PauliStringSum(dense_qh(chain)), SQC)

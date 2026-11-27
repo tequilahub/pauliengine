@@ -1,5 +1,5 @@
 [build-system]
-requires = ["nanobind", "scikit-build-core>=0.11", "setuptools-scm>=8", "conan"]
+requires = ["nanobind", "scikit-build-core>=0.11", "setuptools-scm>=8"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -89,9 +89,8 @@ logging.level = "INFO"
 cmake.version = "CMakeLists.txt"
 cmake.build-type = "Release"
 cmake.args = [
-  "-DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake",
-  # Multi-config generators (Visual Studio) would also generate a Debug config,
-  # for which Conan provides no libraries. Ignored by single-config generators.
+  # Multi-config generators (Visual Studio) would also generate a Debug config;
+  # only Release is built. Ignored by single-config generators.
   "-DCMAKE_CONFIGURATION_TYPES=Release",
 ]
 ninja.make-fallback = false

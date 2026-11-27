@@ -94,7 +94,7 @@ class SparseCycleProducts {
                         }
                 }
                 const size_t pairs = a.size() * b.size();
-                // SymEngine's reference counts are not atomic: symbolic sums stay serial
+                // The parallel path accumulates complex numbers only: symbolic sums stay serial
                 if (!std::is_same_v<Coeff, std::complex<double>> || pairs < 2 || !use_threads(visits / kVisitsPerUnit)) {
                         run_serial(a, ca, b, cb, n, op);
                 } else {
