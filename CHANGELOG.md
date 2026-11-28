@@ -65,7 +65,7 @@ Pauli decomposition of matrices.
   including cycles, orbits (expanded into sparse strings) and unweighted ones, unless the
   other operand has bit vectors and does not fit the rule. Products and commutators
   (also `square` and `**`) always come back as `PauliString` / `PauliStringSum` with
-  bit vectors; two sparse operands are still multiplied with the sparse kernels.
+  bit vectors; two sparse operands are still multiplied in the sparse representation.
   Every Python constructor that takes Pauli strings also takes sparse ones (sums from
   lists in any mix, `PauliCycle(n, base)`, `unweighted_pauliString(s)`,
   `unweighted_PauliStringSum(h)`). Sparse and bit-vector classes have the same methods
@@ -177,6 +177,15 @@ Pauli decomposition of matrices.
 
 ### Changed
 
+- **Symbolic sums are stored flat**, like complex ones: the operator words of all terms
+  in one block and the polynomial coefficients in a vector, instead of one `PauliString`
+  object per term. Sums, differences, scaling, compaction, `dagger`, `diff` and `subs`
+  move words in bulk and run on several threads; products, commutators and squares write
+  their results straight into that storage, also for strings beyond 512 qubits. With
+  1000 terms on 1000 qubits (16 threads) a product takes 154 instead of 437 ms and a sum
+  of two such products 260 instead of 1826 ms. Symbolic coefficients also take the
+  parallel paths of sparse products, cycle products and cycle sums, which were serial
+  for SymEngine. Results do not depend on the number of threads.
 - **`QubitHamiltonian` is now `PauliStringSum` in Python**: the factory
   `pe.PauliStringSum`, the classes `PauliStringSumComplex` / `PauliStringSumSymbolic`,
   `unweighted_PauliStringSum`, the method `to_pauli_string_sum()` of cycles, orbits and
@@ -261,7 +270,7 @@ Pauli decomposition of matrices.
   and the commutator skips whole innermost loops of commuting overlap tables. Results,
   including the order of the summands, are unchanged.
 - C++ only: internal helpers (`WordVec`, the coefficient helpers, the flat term storage
-  and the product kernel) live in `include/pauliengine/detail/`; the public headers
+  and the product algorithm) live in `include/pauliengine/detail/`; the public headers
   include them as before. `PauliCycleSum.h` and `PauliOrbitSum.h` now hold the member
   functions of their classes and can be included on their own.
 - `h * h`, `h ** n` (`power`) and the new C++ method `square()` compute the square of a

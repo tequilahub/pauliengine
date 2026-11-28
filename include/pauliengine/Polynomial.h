@@ -713,7 +713,7 @@ class Expression {
                 return out;
         }
 
-        // -- low-level access for kernels that work on whole Hamiltonians ---------
+        // -- low-level access for algorithms that work on whole Hamiltonians ------
 
         static uint32_t symbol_of(uint64_t f) { return factor_id(f); }
         static uint32_t exponent_of(uint64_t f) { return factor_exp(f); }
@@ -882,7 +882,7 @@ class Expression {
                 std::vector<uint64_t> factors_;
         };
 
-        // -- arithmetic kernels -------------------------------------------------
+        // -- arithmetic -----------------------------------------------------------
 
         static Expression combine(const Expression& a, const Expression& b, bool subtract) {
                 if (b.n_ == 0) return a;

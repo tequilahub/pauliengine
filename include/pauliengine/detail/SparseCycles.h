@@ -94,8 +94,7 @@ class SparseCycleProducts {
                         }
                 }
                 const size_t pairs = a.size() * b.size();
-                // The parallel path accumulates complex numbers only: symbolic sums stay serial
-                if (!std::is_same_v<Coeff, std::complex<double>> || pairs < 2 || !use_threads(visits / kVisitsPerUnit)) {
+                if (pairs < 2 || !use_threads(visits / kVisitsPerUnit)) {
                         run_serial(a, ca, b, cb, n, op);
                 } else {
                         run_parallel(a, ca, b, cb, n, op);

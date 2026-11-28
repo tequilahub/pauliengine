@@ -1,6 +1,6 @@
 #pragma once
-/// Internal: flat storage of the terms of a QubitHamiltonian with complex
-/// coefficients, and small helpers on single terms.
+/// Internal: flat storage of the terms of a QubitHamiltonian (FlatTerms for complex,
+/// SymbolicTerms for polynomial coefficients), and small helpers on single terms.
 
 #include <algorithm>
 #include <complex>
@@ -10,6 +10,7 @@
 #include <memory>
 #include <new>
 #include <utility>
+#include <vector>
 
 #include "pauliengine/PauliString.h"
 #include "pauliengine/detail/Parallel.h"
@@ -264,6 +265,115 @@ class FlatTerms {
 
         std::unique_ptr<uint64_t[], FreeDeleter> words_;
         std::unique_ptr<double[], FreeDeleter> coeffs_;
+};
+
+/// The terms of a Hamiltonian with polynomial coefficients, stored flat like
+/// FlatTerms: row i holds the x and then the y words of term i, padded with zeros to
+/// the common width, in one block; the coefficients are a vector of values. Copying
+/// or sorting a sum moves words in bulk instead of one string object per term.
+template<typename Coeff>
+class SymbolicTerms {
+    public:
+        SymbolicTerms() = default;
+
+        /// n terms of nw words each; words uninitialised, coefficients zero.
+        SymbolicTerms(size_t n, size_t nw)
+                : n_(n), nw_(nw), words_(allocate_block<uint64_t>(2 * n * nw)), coeffs_(n) {}
+
+        SymbolicTerms(const SymbolicTerms& o) : n_(o.n_), nw_(o.nw_), words_(allocate_block<uint64_t>(2 * o.n_ * o.nw_)),
+                                                coeffs_(o.coeffs_) {
+                std::copy(o.words_.get(), o.words_.get() + 2 * n_ * nw_, words_.get());
+        }
+
+        SymbolicTerms(SymbolicTerms&& o) noexcept
+                : n_(std::exchange(o.n_, 0)), nw_(std::exchange(o.nw_, 0)),
+                  words_(std::move(o.words_)), coeffs_(std::move(o.coeffs_)) {}
+
+        SymbolicTerms& operator=(const SymbolicTerms& o) {
+                if (this != &o) *this = SymbolicTerms(o);
+                return *this;
+        }
+
+        SymbolicTerms& operator=(SymbolicTerms&& o) noexcept {
+                n_ = std::exchange(o.n_, 0);
+                nw_ = std::exchange(o.nw_, 0);
+                words_ = std::move(o.words_);
+                coeffs_ = std::move(o.coeffs_);
+                return *this;
+        }
+
+        size_t size() const noexcept { return n_; }
+        /// Words per term, the same for x and y.
+        size_t width() const noexcept { return nw_; }
+
+        uint64_t* x(size_t i) noexcept { return words_.get() + 2 * nw_ * i; }
+        uint64_t* y(size_t i) noexcept { return x(i) + nw_; }
+        const uint64_t* x(size_t i) const noexcept { return words_.get() + 2 * nw_ * i; }
+        const uint64_t* y(size_t i) const noexcept { return x(i) + nw_; }
+
+        const Coeff& coeff(size_t i) const noexcept { return coeffs_[i]; }
+        Coeff& coeff(size_t i) noexcept { return coeffs_[i]; }
+        void set_coeff(size_t i, Coeff c) { coeffs_[i] = std::move(c); }
+
+        /// Words of term i without its trailing zero words, as a PauliString keeps them.
+        size_t used_words(size_t i) const noexcept {
+                size_t n = nw_;
+                while (n > 0 && x(i)[n - 1] == 0 && y(i)[n - 1] == 0) --n;
+                return n;
+        }
+
+        /// Sets the words of row i to x and y (nw <= width() words each), padded with zeros.
+        void set_words(size_t i, const uint64_t* x_in, const uint64_t* y_in, size_t nw) noexcept {
+                uint64_t* rx = x(i);
+                uint64_t* ry = y(i);
+                for (size_t k = 0; k < nw_; ++k) {
+                        rx[k] = k < nw ? x_in[k] : 0;
+                        ry[k] = k < nw ? y_in[k] : 0;
+                }
+        }
+
+        PauliString<Coeff> term(size_t i) const {
+                PauliString<Coeff> ps;
+                const size_t nw = used_words(i);
+                ps.x.assign(x(i), x(i) + nw);
+                ps.y.assign(y(i), y(i) + nw);
+                ps.coeff = coeffs_[i];
+                return ps;
+        }
+
+        std::vector<PauliString<Coeff>> terms() const {
+                std::vector<PauliString<Coeff>> out(n_);
+                for_each_index(n_, use_threads(n_ * (nw_ + 16)), [&](size_t i) { out[i] = term(i); });
+                return out;
+        }
+
+        bool has_zero_coeff() const noexcept {
+                for (const Coeff& c : coeffs_) {
+                        if (c.is_zero()) return true;
+                }
+                return false;
+        }
+
+        /// Removes the terms with coefficient zero, keeping the order of the others.
+        void drop_zero_terms() {
+                size_t write = 0;
+                for (size_t read = 0; read < n_; ++read) {
+                        if (coeffs_[read].is_zero()) continue;
+                        if (write != read) {
+                                std::copy(x(read), x(read) + 2 * nw_, x(write));
+                                coeffs_[write] = std::move(coeffs_[read]);
+                        }
+                        ++write;
+                }
+                n_ = write;
+                coeffs_.resize(write);
+        }
+
+    private:
+        size_t n_ = 0;
+        size_t nw_ = 0;
+        std::unique_ptr<uint64_t[], FreeDeleter> words_;
+        std::vector<Coeff> coeffs_;
 };
 
 }  // namespace pauliengine_detail

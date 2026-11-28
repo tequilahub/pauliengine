@@ -48,17 +48,18 @@ inline constexpr already_compacted_t already_compacted{};
 /// A sum of Pauli strings. Kept compacted: no two terms share an operator, and
 /// zero terms are dropped (only scaling by zero leaves them in place).
 ///
-/// With complex coefficients the terms are stored flat (pauliengine_detail::FlatTerms),
-/// and products, commutators and sums work on that storage directly; terms() builds
-/// Pauli strings from it on request. Symbolic (polynomial) coefficients have a
-/// variable size and are kept as a vector of strings; their products, commutators
-/// and compaction run in parallel as well.
+/// The terms are stored flat for both coefficient types: the operator words of all
+/// terms in one block, complex coefficients as an array of numbers
+/// (pauliengine_detail::FlatTerms), polynomial ones as a vector of values
+/// (pauliengine_detail::SymbolicTerms). Products, commutators, sums and compaction
+/// work on that storage directly and in parallel; terms() builds Pauli strings from
+/// it on request.
 template<typename Coeff>
 class QubitHamiltonian{
         static constexpr bool kFlat = std::is_same_v<Coeff, std::complex<double>>;
         using FlatTerms = pauliengine_detail::FlatTerms;
         using TermView = pauliengine_detail::TermView;
-        using Storage = std::conditional_t<kFlat, FlatTerms, std::vector<PauliString<Coeff>>>;
+        using Storage = std::conditional_t<kFlat, FlatTerms, pauliengine_detail::SymbolicTerms<Coeff>>;
 
         Storage store_;
 
@@ -70,8 +71,9 @@ class QubitHamiltonian{
                 if constexpr (kFlat) {
                         store_ = merge_strings(terms);
                 } else {
-                        store_ = terms;
-                        compact_in_place();
+                        std::vector<Coeff> coeffs(terms.size());
+                        for (size_t i = 0; i < terms.size(); ++i) coeffs[i] = terms[i].coeff;
+                        store_ = merge_symbolic_strings(terms, coeffs);
                 }
         }
 
@@ -79,19 +81,16 @@ class QubitHamiltonian{
                 if constexpr (kFlat) {
                         store_ = merge_strings(terms);
                 } else {
-                        store_ = std::move(terms);
-                        compact_in_place();
+                        std::vector<Coeff> coeffs(terms.size());
+                        for (size_t i = 0; i < terms.size(); ++i) coeffs[i] = std::move(terms[i].coeff);
+                        store_ = merge_symbolic_strings(terms, coeffs);
                 }
         }
 
         /// Fast-path constructor: skips compact(). Only use when you can prove
         /// the vector has no duplicates and no zero-coefficient terms.
         QubitHamiltonian(std::vector<PauliString<Coeff>>&& terms, already_compacted_t) {
-                if constexpr (kFlat) {
-                        store_ = copy_strings(terms);
-                } else {
-                        store_ = std::move(terms);
-                }
+                store_ = copy_strings(terms);
         }
 
         QubitHamiltonian(const Hamiltonian_structure<Coeff>& data)
@@ -101,23 +100,10 @@ class QubitHamiltonian{
         size_t size() const { return store_.size(); }
 
         /// Term i as a Pauli string.
-        PauliString<Coeff> term(size_t i) const {
-                if constexpr (kFlat) {
-                        return store_.term(i);
-                } else {
-                        return store_[i];
-                }
-        }
+        PauliString<Coeff> term(size_t i) const { return store_.term(i); }
 
-        /// All terms as Pauli strings. Complex Hamiltonians build them from the flat
-        /// storage and return them by value; symbolic ones return their own vector.
-        decltype(auto) terms() const {
-                if constexpr (kFlat) {
-                        return store_.terms();
-                } else {
-                        return (store_);
-                }
-        }
+        /// All terms as Pauli strings, built from the flat storage.
+        std::vector<PauliString<Coeff>> terms() const { return store_.terms(); }
 
         QubitHamiltonian trace_out_qubits(const std::vector<int>& qubits, const std::vector<int>& state) const {
                 // The constructor drops zero-coefficient terms, including the sentinel
@@ -165,26 +151,7 @@ class QubitHamiltonian{
                 if constexpr (kFlat) {
                         return QubitHamiltonian(product_flat(store_, other.store_), from_storage_t{});
                 } else {
-                        Storage packed;
-                        if (packed_pairs(store_, other.store_, false, packed)) {
-                                return QubitHamiltonian(std::move(packed), from_storage_t{});
-                        }
-                        if (auto terms = symbolic_pairs(store_, other.store_, PairKind::Product)) {
-                                return QubitHamiltonian(std::move(*terms), already_compacted);
-                        }
-                        // Fallback (monomials do not fit 64 bits, or very wide strings):
-                        // polynomial coefficients are plain values, so every row of the
-                        // product table can be formed on its own thread.
-                        const size_t na = store_.size();
-                        const size_t nb = other.store_.size();
-                        std::vector<PauliString<Coeff>> product(na * nb);
-                        pauliengine_detail::for_each_index(na, pauliengine_detail::use_threads(na * nb), [&](size_t i) {
-                                const PauliString<Coeff>& a = store_[i];
-                                for (size_t j = 0; j < nb; ++j) {
-                                        product[i * nb + j] = a * other.store_[j];
-                                }
-                        });
-                        return QubitHamiltonian(std::move(product));
+                        return QubitHamiltonian(symbolic_pairs(store_, other.store_, PairKind::Product), from_storage_t{});
                 }
         }
 
@@ -192,11 +159,7 @@ class QubitHamiltonian{
                 if constexpr (kFlat) {
                         return QubitHamiltonian(add_flat(store_, other.store_, false), from_storage_t{});
                 } else {
-                        std::vector<PauliString<Coeff>> combined;
-                        combined.reserve(store_.size() + other.store_.size());
-                        combined.insert(combined.end(), store_.begin(), store_.end());
-                        combined.insert(combined.end(), other.store_.begin(), other.store_.end());
-                        return QubitHamiltonian(std::move(combined));  // constructor calls compact()
+                        return QubitHamiltonian(add_symbolic(store_, other.store_, false), from_storage_t{});
                 }
         }
 
@@ -204,7 +167,7 @@ class QubitHamiltonian{
                 if constexpr (kFlat) {
                         return QubitHamiltonian(add_flat(store_, other.store_, true), from_storage_t{});
                 } else {
-                        return *this + (other * -1.0);
+                        return QubitHamiltonian(add_symbolic(store_, other.store_, true), from_storage_t{});
                 }
         }
 
@@ -324,13 +287,8 @@ class QubitHamiltonian{
         }
 
         QubitHamiltonian set_all_coeff(std::complex<double> value) const {
-                Coeff coeff;
-                if constexpr (kFlat) {
-                        coeff = value;
-                } else {
-                        coeff = Expression(value);
-                }
-                return map_terms([&](const PauliString<Coeff>& ps) { return PauliString<Coeff>(ps.x, ps.y, coeff); });
+                const Coeff coeff = pauliengine_detail::coeff_as<Coeff>(value);
+                return map_coeffs([&](size_t, const Coeff&) { return coeff; });
         }
 
         QubitHamiltonian diff(std::string symbol) const {
@@ -340,9 +298,7 @@ class QubitHamiltonian{
                         // Resolve the name once, not once per term under the table lock.
                         typename Coeff::DiffTarget target;
                         if (!Coeff::prepare_diff(symbol, target)) return zero();
-                        return map_terms([&](const PauliString<Coeff>& ps) {
-                                return PauliString<Coeff>(ps.x, ps.y, ps.coeff.diff(target));
-                        });
+                        return map_coeffs([&](size_t, const Coeff& c) { return c.diff(target); });
                 }
         }
 
@@ -354,9 +310,7 @@ class QubitHamiltonian{
                         return map_terms([&](const PauliString<Coeff>& ps) { return ps.substitute(substitution_map); });
                 } else {
                         const auto values = Coeff::prepare_subs(substitution_map);
-                        return map_terms([&](const PauliString<Coeff>& ps) {
-                                return PauliString<Coeff>(ps.x, ps.y, ps.coeff.subs(values));
-                        });
+                        return map_coeffs([&](size_t, const Coeff& c) { return c.subs(values); });
                 }
         }
 
@@ -366,20 +320,12 @@ class QubitHamiltonian{
         // operator parts unique, hence at most one term can match.
         template<typename C>
         Coeff contains(const PauliString<C>& ps) const {
-                if constexpr (kFlat) {
-                        const size_t nw = ps.x.size();
-                        for (size_t i = 0; i < store_.size(); ++i) {
-                                if (store_.used_words(i) == nw
-                                    && std::equal(ps.x.begin(), ps.x.end(), store_.x(i))
-                                    && std::equal(ps.y.begin(), ps.y.end(), store_.y(i))) {
-                                        return store_.coeff(i);
-                                }
-                        }
-                } else {
-                        for (const auto& term : store_) {
-                                if (term.x == ps.x && term.y == ps.y) {
-                                        return term.coeff;
-                                }
+                const size_t nw = ps.x.size();
+                for (size_t i = 0; i < store_.size(); ++i) {
+                        if (store_.used_words(i) == nw
+                            && std::equal(ps.x.begin(), ps.x.end(), store_.x(i))
+                            && std::equal(ps.y.begin(), ps.y.end(), store_.y(i))) {
+                                return store_.coeff(i);
                         }
                 }
                 return make_zero();
@@ -478,35 +424,7 @@ class QubitHamiltonian{
                 if constexpr (kFlat) {
                         return QubitHamiltonian(commutator_flat(store_, other.store_), from_storage_t{});
                 } else {
-                        Storage packed;
-                        if (packed_pairs(store_, other.store_, true, packed)) {
-                                return QubitHamiltonian(std::move(packed), from_storage_t{});
-                        }
-                        if (auto terms = symbolic_pairs(store_, other.store_, PairKind::Commutator)) {
-                                return QubitHamiltonian(std::move(*terms), already_compacted);
-                        }
-                        // Fallback: one list per row of the pair table, filled in parallel and
-                        // joined in row order, so the result does not depend on the thread count.
-                        const size_t na = store_.size();
-                        const size_t nb = other.store_.size();
-                        std::vector<std::vector<PauliString<Coeff>>> rows(na);
-                        pauliengine_detail::for_each_index(na, pauliengine_detail::use_threads(na * nb), [&](size_t i) {
-                                const PauliString<Coeff>& a = store_[i];
-                                for (const auto& b : other.store_) {
-                                        PauliString<Coeff> t = a.commutator(b);
-                                        if (!t.x.empty()) {  // commuting pairs give the empty string
-                                                rows[i].push_back(std::move(t));
-                                        }
-                                }
-                        });
-                        size_t total = 0;
-                        for (const auto& r : rows) total += r.size();
-                        std::vector<PauliString<Coeff>> terms;
-                        terms.reserve(total);
-                        for (auto& r : rows) {
-                                std::move(r.begin(), r.end(), std::back_inserter(terms));
-                        }
-                        return QubitHamiltonian(std::move(terms));  // constructor calls compact()
+                        return QubitHamiltonian(symbolic_pairs(store_, other.store_, PairKind::Commutator), from_storage_t{});
                 }
         }
 
@@ -522,25 +440,15 @@ class QubitHamiltonian{
                                 }
                         }
                 };
-                if constexpr (kFlat) {
-                        for (size_t i = 0; i < store_.size(); ++i) add(store_.x(i), store_.y(i), store_.width());
-                } else {
-                        for (const auto& ps : store_) add(ps.x.data(), ps.y.data(), ps.x.size());
-                }
+                for (size_t i = 0; i < store_.size(); ++i) add(store_.x(i), store_.y(i), store_.width());
                 return std::vector<int>(qs.begin(), qs.end());
         }
 
         int n_qubits() const { return (int)qubits().size(); }
 
         bool is_all_z() const {
-                if constexpr (kFlat) {
-                        for (size_t i = 0; i < store_.size(); ++i) {
-                                if (!std::equal(store_.x(i), store_.x(i) + store_.width(), store_.y(i))) return false;
-                        }
-                } else {
-                        for (const auto& ps : store_) {
-                                if (!ps.is_all_z()) return false;
-                        }
+                for (size_t i = 0; i < store_.size(); ++i) {
+                        if (!std::equal(store_.x(i), store_.x(i) + store_.width(), store_.y(i))) return false;
                 }
                 return true;
         }
@@ -557,8 +465,8 @@ class QubitHamiltonian{
                         return true;
                 } else {
                         try {
-                                for (const auto& ps : store_) {
-                                        auto c = PauliString<Coeff>::to_complex(ps.coeff);
+                                for (size_t i = 0; i < store_.size(); ++i) {
+                                        auto c = PauliString<Coeff>::to_complex(store_.coeff(i));
                                         if (std::abs(c.imag()) > 1e-12) return false;
                                 }
                                 return true;
@@ -576,8 +484,8 @@ class QubitHamiltonian{
                         return true;
                 } else {
                         try {
-                                for (const auto& ps : store_) {
-                                        auto c = PauliString<Coeff>::to_complex(ps.coeff);
+                                for (size_t i = 0; i < store_.size(); ++i) {
+                                        auto c = PauliString<Coeff>::to_complex(store_.coeff(i));
                                         if (std::abs(c.real()) > 1e-12) return false;
                                 }
                                 return true;
@@ -603,30 +511,21 @@ class QubitHamiltonian{
 
         QubitHamiltonian dagger() const {
                 const ConjMap conj = conjugation_map();
-                return map_terms([&](const PauliString<Coeff>& ps) {
-                        return PauliString<Coeff>(ps.x, ps.y, conjugate_coeff(ps.coeff, conj));
-                });
+                return map_coeffs([&](size_t, const Coeff& c) { return conjugate_coeff(c, conj); });
         }
 
+        /// Complex conjugate: conjugated coefficients, and a sign for an odd number of Y.
         QubitHamiltonian conjugate() const {
                 const ConjMap conj = conjugation_map();
-                return map_terms([&](const PauliString<Coeff>& ps) {
-                        Coeff new_coeff = conjugate_coeff(ps.coeff, conj);
-                        if (ps.count_y() % 2 == 1) {
-                                new_coeff = new_coeff * -1.0;
-                        }
-                        return PauliString<Coeff>(ps.x, ps.y, new_coeff);
+                return map_coeffs([&](size_t i, const Coeff& c) {
+                        Coeff out = conjugate_coeff(c, conj);
+                        return odd_y(i) ? out * -1.0 : out;
                 });
         }
 
+        /// Transpose: a sign for an odd number of Y.
         QubitHamiltonian transpose() const {
-                return map_terms([](const PauliString<Coeff>& ps) {
-                        Coeff new_coeff = ps.coeff;
-                        if (ps.count_y() % 2 == 1) {
-                                new_coeff = new_coeff * -1.0;
-                        }
-                        return PauliString<Coeff>(ps.x, ps.y, new_coeff);
-                });
+                return map_coeffs([&](size_t i, const Coeff& c) { return odd_y(i) ? c * -1.0 : c; });
         }
 
         QubitHamiltonian simplify(double threshold = 0.0) const {
@@ -712,30 +611,7 @@ class QubitHamiltonian{
                 if constexpr (kFlat) {
                         return QubitHamiltonian(square_flat(store_), from_storage_t{});
                 } else {
-                        if (auto terms = symbolic_pairs(store_, store_, PairKind::Square)) {
-                                return QubitHamiltonian(std::move(*terms), already_compacted);
-                        }
-                        const size_t n = store_.size();
-                        Coeff diagonal = make_zero();
-                        for (const auto& ps : store_) {
-                                diagonal = diagonal + ps.coeff * ps.coeff;
-                        }
-                        std::vector<PauliString<Coeff>> terms;
-                        terms.emplace_back(std::vector<uint64_t>{}, std::vector<uint64_t>{}, diagonal);
-                        for (size_t i = 0; i < n; ++i) {
-                                const PauliString<Coeff>& a = store_[i];
-                                for (size_t j = i + 1; j < n; ++j) {
-                                        const PauliString<Coeff>& b = store_[j];
-                                        if (pauliengine_detail::anticommute_words(a.x.data(), a.y.data(), a.x.size(),
-                                                                                  b.x.data(), b.y.data(), b.x.size())) {
-                                                continue;
-                                        }
-                                        PauliString<Coeff> p = a * b;
-                                        p.coeff = p.coeff * Coeff(2);
-                                        terms.push_back(std::move(p));
-                                }
-                        }
-                        return QubitHamiltonian(std::move(terms));
+                        return QubitHamiltonian(symbolic_pairs(store_, store_, PairKind::Square), from_storage_t{});
                 }
         }
 
@@ -799,21 +675,17 @@ class QubitHamiltonian{
                 size_t nw;
         };
 
-        OperatorWords operator_words(size_t i) const {
-                if constexpr (kFlat) {
-                        return {store_.x(i), store_.y(i), store_.used_words(i)};
-                } else {
-                        const PauliString<Coeff>& ps = store_[i];
-                        return {ps.x.data(), ps.y.data(), ps.x.size()};
-                }
-        }
+        OperatorWords operator_words(size_t i) const { return {store_.x(i), store_.y(i), store_.used_words(i)}; }
 
-        Coeff term_coeff(size_t i) const {
-                if constexpr (kFlat) {
-                        return store_.coeff(i);
-                } else {
-                        return store_[i].coeff;
-                }
+        Coeff term_coeff(size_t i) const { return store_.coeff(i); }
+
+        /// Whether term i has an odd number of Y (a sign under conjugate and transpose).
+        bool odd_y(size_t i) const {
+                const uint64_t* x = store_.x(i);
+                const uint64_t* y = store_.y(i);
+                int count = 0;
+                for (size_t k = 0; k < store_.width(); ++k) count += std::popcount(~x[k] & y[k]);
+                return count & 1;
         }
 
         /// Hash of an operator given by its trimmed words.
@@ -848,28 +720,33 @@ class QubitHamiltonian{
                 return QubitHamiltonian(std::move(mapped));
         }
 
+        /// The same operators with the coefficients f(i, coefficient of term i); terms
+        /// that become zero are dropped. Operators stay unique, so nothing is merged.
+        template<typename F>
+        QubitHamiltonian map_coeffs(F&& f) const {
+                const size_t n = store_.size();
+                Storage out(n, store_.width());
+                if (n > 0) std::copy(store_.x(0), store_.x(0) + 2 * n * store_.width(), out.x(0));
+                // Polynomial coefficients are expensive enough to share out even in small numbers.
+                pauliengine_detail::for_each_index(n, pauliengine_detail::use_threads(kFlat ? n : n * 64),
+                        [&](size_t i) { out.set_coeff(i, f(i, store_.coeff(i))); });
+                if (out.has_zero_coeff()) out.drop_zero_terms();
+                return QubitHamiltonian(std::move(out), from_storage_t{});
+        }
+
         template<typename S>
         QubitHamiltonian scaled(S scale) const {
+                // Stored terms are compacted, apart from the zeros an earlier scaling by
+                // zero leaves; those are dropped as compact() would.
+                Storage out = store_;
+                if (out.has_zero_coeff()) out.drop_zero_terms();
                 if constexpr (kFlat) {
-                        // Stored terms are compacted, apart from the zeros an earlier scaling
-                        // by zero leaves; those are dropped as compact() would.
-                        FlatTerms out = store_;
-                        if (out.has_zero_coeff()) out.drop_zero_terms();
                         out.scale(scale);
-                        return QubitHamiltonian(std::move(out), from_storage_t{});
                 } else {
-                        // Stored terms are compacted apart from zeros of an earlier scaling by
-                        // zero; dropping those is all compact() would do.
-                        Storage copy;
-                        copy.reserve(store_.size());
-                        for (const auto& ps : store_) {
-                                if (!ps.coeff.is_zero()) copy.push_back(ps);
-                        }
-                        QubitHamiltonian out(std::move(copy), from_storage_t{});
-                        pauliengine_detail::for_each_index(out.store_.size(), pauliengine_detail::use_threads(out.store_.size() * 16),
-                                [&](size_t i) { out.store_[i].coeff *= scale; });
-                        return out;
+                        pauliengine_detail::for_each_index(out.size(), pauliengine_detail::use_threads(out.size() * 16),
+                                [&](size_t i) { out.coeff(i) *= scale; });
                 }
+                return QubitHamiltonian(std::move(out), from_storage_t{});
         }
 
         /// Symbol conjugation map, fetched once per operation (empty: all symbols real).
@@ -895,7 +772,11 @@ class QubitHamiltonian{
                 if constexpr (kFlat) {
                         store_ = merge_views(store_.size(), store_.width(), [this](size_t i) { return store_.view(i); });
                 } else {
-                        compact_symbolic();
+                        std::vector<Coeff> coeffs(store_.size());
+                        for (size_t i = 0; i < store_.size(); ++i) coeffs[i] = std::move(store_.coeff(i));
+                        store_ = merge_symbolic(store_.size(), store_.width(), [this](size_t i) {
+                                return OperatorWords{store_.x(i), store_.y(i), store_.width()};
+                        }, coeffs);
                 }
         }
 
@@ -1265,11 +1146,19 @@ class QubitHamiltonian{
         }
 
         /// The strings in their order, without compacting.
-        static FlatTerms copy_strings(const std::vector<PauliString<Coeff>>& strings) {
+        static Storage copy_strings(std::vector<PauliString<Coeff>>& strings) {
                 const size_t nw = widest(strings);
-                FlatTerms out(strings.size(), nw);
+                Storage out(strings.size(), nw);
                 pauliengine_detail::for_each_index(strings.size(), pauliengine_detail::use_threads(strings.size() * nw),
-                        [&](size_t i) { out.set_row(i, pauliengine_detail::view_of(strings[i])); });
+                        [&](size_t i) {
+                                if constexpr (kFlat) {
+                                        out.set_row(i, pauliengine_detail::view_of(strings[i]));
+                                } else {
+                                        const PauliString<Coeff>& ps = strings[i];
+                                        out.set_words(i, ps.x.data(), ps.y.data(), ps.x.size());
+                                        out.set_coeff(i, std::move(strings[i].coeff));
+                                }
+                        });
                 return out;
         }
 
@@ -1526,33 +1415,217 @@ class QubitHamiltonian{
         }
 
         // ------------------------------------------------------------------
-        // Symbolic coefficients
+        // Symbolic coefficients: flat storage with polynomial coefficients
+        //
+        // Terms are merged as for complex coefficients, by sorting keys (operator
+        // words plus the index of the term) instead of the terms themselves; equal
+        // operators are added with one Expression::sum_of per operator, all on
+        // several threads. Ties keep the input order, so results do not depend on
+        // the number of threads.
         // ------------------------------------------------------------------
 
         enum class PairKind { Product, Commutator, Square };
 
-        /// a * b, [a, b] or a * a (b is a then) with symbolic coefficients, or nothing
-        /// if the strings are too wide for fixed-size keys.
-        static std::optional<std::vector<PauliString<Coeff>>> symbolic_pairs(const Storage& a, const Storage& b, PairKind kind) {
-                std::optional<std::vector<PauliString<Coeff>>> out;
-                with_small_key(std::max(widest(a), widest(b)), [&]<size_t W>() { out = symbolic_pairs_small_key<W>(a, b, kind); });
+        /// Sorts the n terms (operator words(i), coefficient coeffs[i]) by operator,
+        /// adds the coefficients of equal operators and returns the non-zero sums,
+        /// ordered by operator, as storage of width nw (words(i).nw <= nw). The
+        /// coefficients are moved from `coeffs`.
+        template<typename Words>
+        static Storage merge_symbolic(size_t n, size_t nw, Words&& words, std::vector<Coeff>& coeffs) {
+                using pauliengine_detail::for_each_index;
+                using pauliengine_detail::use_threads;
+                if (n > UINT32_MAX) throw std::length_error("QubitHamiltonian: more than 2^32 - 1 terms");
+                // Order of the terms by operator, and groups of equal operators in it:
+                // order[heads[g]], ..., order[heads[g + 1] - 1].
+                std::vector<uint32_t> order(n);
+                std::vector<size_t> heads;
+                const auto group = [&](auto&& same) {
+                        heads.reserve(n + 1);
+                        for (size_t r = 0; r < n; ++r) {
+                                if (r == 0 || !same(r - 1, r)) heads.push_back(r);
+                        }
+                        heads.push_back(n);
+                };
+                const bool small = with_small_key(nw, [&]<size_t W>() {
+                        struct Entry {
+                                uint64_t key[2 * W];
+                                uint32_t idx;
+                        };
+                        std::vector<Entry> entries(n);
+                        for_each_index(n, use_threads(n * W), [&](size_t i) {
+                                const OperatorWords w = words(i);
+                                Entry& e = entries[i];
+                                for (size_t k = 0; k < W; ++k) {
+                                        e.key[k] = k < w.nw ? w.x[k] : 0;
+                                        e.key[W + k] = k < w.nw ? w.y[k] : 0;
+                                }
+                                e.idx = static_cast<uint32_t>(i);
+                        });
+                        parallel_sort_vec(entries, [](const Entry& a, const Entry& b) {
+                                for (size_t k = 0; k < 2 * W; ++k) {
+                                        if (a.key[k] != b.key[k]) return a.key[k] < b.key[k];
+                                }
+                                return a.idx < b.idx;
+                        }, use_threads(n * W));
+                        for (size_t r = 0; r < n; ++r) order[r] = entries[r].idx;
+                        group([&](size_t r, size_t t) {
+                                return std::equal(entries[r].key, entries[r].key + 2 * W, entries[t].key);
+                        });
+                });
+                if (!small) {
+                        // Wide strings: compare the words in place, x first, then y.
+                        const auto compare = [&](uint32_t i, uint32_t j) {
+                                const OperatorWords a = words(i);
+                                const OperatorWords b = words(j);
+                                for (int half = 0; half < 2; ++half) {
+                                        const uint64_t* p = half ? a.y : a.x;
+                                        const uint64_t* q = half ? b.y : b.x;
+                                        for (size_t k = 0; k < nw; ++k) {
+                                                const uint64_t u = k < a.nw ? p[k] : 0;
+                                                const uint64_t v = k < b.nw ? q[k] : 0;
+                                                if (u != v) return u < v ? -1 : 1;
+                                        }
+                                }
+                                return 0;
+                        };
+                        std::iota(order.begin(), order.end(), uint32_t{0});
+                        parallel_sort_vec(order, [&](uint32_t i, uint32_t j) {
+                                const int c = compare(i, j);
+                                return c != 0 ? c < 0 : i < j;
+                        }, use_threads(n * nw));
+                        group([&](size_t r, size_t t) { return compare(order[r], order[t]) == 0; });
+                }
+
+                const size_t groups = heads.size() - 1;
+                std::vector<Coeff> sums(groups);
+                std::vector<char> keep(groups, 0);
+                for_each_index(groups, use_threads(n * 16), [&](size_t g) {
+                        const size_t begin = heads[g];
+                        const size_t count = heads[g + 1] - begin;
+                        Coeff acc = count == 1
+                                ? std::move(coeffs[order[begin]])
+                                : Coeff::sum_of(count, [&](size_t t) -> const Coeff& { return coeffs[order[begin + t]]; });
+                        if (!acc.is_zero()) {
+                                sums[g] = std::move(acc);
+                                keep[g] = 1;
+                        }
+                });
+                std::vector<size_t> position(groups + 1, 0);
+                for (size_t g = 0; g < groups; ++g) position[g + 1] = position[g] + keep[g];
+                Storage out(position[groups], nw);
+                for_each_index(groups, use_threads(groups * (nw + 4)), [&](size_t g) {
+                        if (!keep[g]) return;
+                        const OperatorWords w = words(order[heads[g]]);
+                        out.set_words(position[g], w.x, w.y, w.nw);
+                        out.set_coeff(position[g], std::move(sums[g]));
+                });
                 return out;
         }
 
+        /// The strings compacted; their coefficients are moved from `coeffs`.
+        static Storage merge_symbolic_strings(const std::vector<PauliString<Coeff>>& strings, std::vector<Coeff>& coeffs) {
+                return merge_symbolic(strings.size(), widest(strings), [&](size_t i) {
+                        const PauliString<Coeff>& ps = strings[i];
+                        return OperatorWords{ps.x.data(), ps.y.data(), ps.x.size()};
+                }, coeffs);
+        }
+
+        /// a + b, or a - b if `subtract`.
+        static Storage add_symbolic(const Storage& a, const Storage& b, bool subtract) {
+                const size_t na = a.size();
+                const size_t n = na + b.size();
+                std::vector<Coeff> coeffs(n);
+                pauliengine_detail::for_each_index(n, pauliengine_detail::use_threads(n * 16), [&](size_t i) {
+                        if (i < na) coeffs[i] = a.coeff(i);
+                        else coeffs[i] = subtract ? -b.coeff(i - na) : b.coeff(i - na);
+                });
+                return merge_symbolic(n, std::max(a.width(), b.width()), [&](size_t i) {
+                        return i < na ? OperatorWords{a.x(i), a.y(i), a.width()}
+                                      : OperatorWords{b.x(i - na), b.y(i - na), b.width()};
+                }, coeffs);
+        }
+
+        /// i^k * scale as a complex number.
+        static std::complex<double> phase_factor(int k, double scale) {
+                static constexpr std::complex<double> kPowers[4] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
+                return kPowers[k & 3] * scale;
+        }
+
+        /// Whether the pair (a_i, b_j) contributes to `kind`: every pair to a product,
+        /// anti-commuting ones to a commutator, commuting ones (i <= j) to a square.
+        /// Only the parity of the symplectic product is formed, which is much cheaper
+        /// than the product, so most pairs of a commutator cost little.
+        static bool pair_contributes(PairKind kind, const Storage& a, size_t i, const Storage& b, size_t j) {
+                if (kind == PairKind::Product) return true;
+                const bool anti = pauliengine_detail::anticommute_words(a.x(i), a.y(i), a.width(), b.x(j), b.y(j), b.width());
+                return kind == PairKind::Commutator ? anti : !anti;
+        }
+
+        /// The partners j of every row i that contribute to `kind`, each pair tested
+        /// once (a product takes all of b and needs no list); offset[i] is where the
+        /// pairs of row i start in the output, offset[n1] their number.
+        struct PairRows {
+                std::vector<std::vector<uint32_t>> partners;  // empty for a product
+                std::vector<size_t> offset;
+        };
+
+        static PairRows pair_rows(const Storage& a, const Storage& b, PairKind kind) {
+                const size_t n1 = a.size();
+                const size_t n2 = b.size();
+                if (n2 > UINT32_MAX) throw std::length_error("QubitHamiltonian: more than 2^32 - 1 terms in a product");
+                PairRows rows;
+                rows.offset.assign(n1 + 1, 0);
+                if (kind == PairKind::Product) {
+                        for (size_t i = 0; i < n1; ++i) rows.offset[i + 1] = rows.offset[i] + n2;
+                        return rows;
+                }
+                rows.partners.resize(n1);
+                pauliengine_detail::for_each_index(n1, pauliengine_detail::use_threads(n1 * n2), [&](size_t i) {
+                        std::vector<uint32_t>& mine = rows.partners[i];
+                        for (size_t j = kind == PairKind::Square ? i : 0; j < n2; ++j) {
+                                if (pair_contributes(kind, a, i, b, j)) mine.push_back(static_cast<uint32_t>(j));
+                        }
+                });
+                for (size_t i = 0; i < n1; ++i) rows.offset[i + 1] = rows.offset[i] + rows.partners[i].size();
+                return rows;
+        }
+
+        /// Calls f(j) for the partners of row i (see pair_rows).
+        template<typename F>
+        static void for_each_partner(const PairRows& rows, size_t i, size_t n2, F&& f) {
+                if (rows.partners.empty()) {
+                        for (size_t j = 0; j < n2; ++j) f(j);
+                } else {
+                        for (uint32_t j : rows.partners[i]) f(j);
+                }
+        }
+
+        /// The factor a contributing pair counts with: 2 in a commutator, and for i < j in a square.
+        static double pair_scale(PairKind kind, size_t i, size_t j) {
+                return kind == PairKind::Commutator || (kind == PairKind::Square && i != j) ? 2.0 : 1.0;
+        }
+
+        /// a * b, [a, b] or a * a (b is a then, pairs i <= j). Tries the packed records,
+        /// then grouping of pairs by operator, then the version for wide strings.
+        static Storage symbolic_pairs(const Storage& a, const Storage& b, PairKind kind) {
+                Storage out;
+                if (kind != PairKind::Square && packed_pairs(a, b, kind == PairKind::Commutator, out)) return out;
+                const size_t nw = std::max(a.width(), b.width());
+                if (with_small_key(nw, [&]<size_t W>() { out = symbolic_pairs_small_key<W>(a, b, kind); })) return out;
+                return wide_pairs(a, b, kind);
+        }
+
         /// The pairs are first grouped by the operator they give, with flat keys
-        /// only, as in the products of complex sums. The phase i^k and the factor 2 of
-        /// a pair are taken into the coefficient of its left factor, which has only
+        /// only, as in the products of complex sums. The phase i^k and the factor of a
+        /// pair are taken into the coefficient of its left factor, which has only
         /// eight such variants: every pair then costs one polynomial product, and every
-        /// operator one merged sum, instead of up to three operations per pair and a
-        /// chain of additions. Used for squares, and for products and commutators
-        /// whose monomials do not fit packed_pairs. Phase and factor are exact (sign changes, swapped parts, a
-        /// power of two), so the order in which they are applied does not matter.
-        ///
-        /// The terms come out ordered by operator and compacted, the pairs of an
-        /// operator added in the order (i, j): the result does not depend on the
-        /// number of threads.
+        /// operator one merged sum. Used for squares, and for products and commutators
+        /// whose monomials do not fit packed_pairs. Pairs and sums are formed on several
+        /// threads; the pairs of an operator are added in the order (i, j).
         template<size_t W>
-        static std::vector<PauliString<Coeff>> symbolic_pairs_small_key(const Storage& a, const Storage& b, PairKind kind) {
+        static Storage symbolic_pairs_small_key(const Storage& a, const Storage& b, PairKind kind) {
+                using pauliengine_detail::for_each_index;
+                using pauliengine_detail::use_threads;
                 struct Pair {
                         uint64_t key[2 * W];
                         uint32_t i, j;
@@ -1563,85 +1636,113 @@ class QubitHamiltonian{
                 if (n1 > UINT32_MAX || n2 > UINT32_MAX) {
                         throw std::length_error("QubitHamiltonian: more than 2^32 - 1 terms in a product");
                 }
-                const bool square = kind == PairKind::Square;
-                std::vector<Pair> pairs;
-                pairs.reserve(square ? n1 * (n1 + 1) / 2 : (kind == PairKind::Commutator ? n1 * n2 / 2 : n1 * n2));
-                for (size_t i = 0; i < n1; ++i) {
-                        const PauliString<Coeff>& left = a[i];
-                        for (size_t j = square ? i : 0; j < n2; ++j) {
-                                const PauliString<Coeff>& right = b[j];
-                                const int k = symplectic_product_phase(left.x.data(), left.y.data(), left.x.size(),
-                                                                       right.x.data(), right.y.data(), right.x.size()) & 3;
-                                // odd k: the strings anti-commute
-                                if (kind == PairKind::Commutator && !(k & 1)) continue;
-                                if (square && (k & 1)) continue;
-                                Pair& p = pairs.emplace_back();
+                const size_t wa = a.width();
+                const size_t wb = b.width();
+                // Row i writes its pairs to [offset[i], offset[i + 1]).
+                const PairRows rows = pair_rows(a, b, kind);
+                const std::vector<size_t>& offset = rows.offset;
+                std::vector<Pair> pairs(offset[n1]);
+                for_each_index(n1, use_threads(offset[n1] * W), [&](size_t i) {
+                        Pair* write = pairs.data() + offset[i];
+                        for_each_partner(rows, i, n2, [&](size_t j) {
+                                const int k = symplectic_product_phase(a.x(i), a.y(i), wa, b.x(j), b.y(j), wb) & 3;
+                                Pair& p = *write++;
                                 for (size_t w = 0; w < W; ++w) {
-                                        p.key[w] = (w < left.x.size() ? left.x[w] : 0) ^ (w < right.x.size() ? right.x[w] : 0);
-                                        p.key[W + w] = (w < left.y.size() ? left.y[w] : 0) ^ (w < right.y.size() ? right.y[w] : 0);
+                                        p.key[w] = (w < wa ? a.x(i)[w] : 0) ^ (w < wb ? b.x(j)[w] : 0);
+                                        p.key[W + w] = (w < wa ? a.y(i)[w] : 0) ^ (w < wb ? b.y(j)[w] : 0);
                                 }
                                 p.i = static_cast<uint32_t>(i);
                                 p.j = static_cast<uint32_t>(j);
-                                const bool twice = kind == PairKind::Commutator || (square && i != j);
-                                p.variant = static_cast<uint32_t>(k) | (twice ? 4u : 0u);
-                        }
-                }
-                const auto pair_less = [](const Pair& x, const Pair& y) {
+                                p.variant = static_cast<uint32_t>(k) | (pair_scale(kind, i, j) != 1.0 ? 4u : 0u);
+                        });
+                });
+                parallel_sort_vec(pairs, [](const Pair& x, const Pair& y) {
                         for (size_t w = 0; w < 2 * W; ++w) {
                                 if (x.key[w] != y.key[w]) return x.key[w] < y.key[w];
                         }
                         return x.i != y.i ? x.i < y.i : x.j < y.j;
-                };
-                parallel_sort_vec(pairs, pair_less, pauliengine_detail::use_threads(pairs.size() * W));
+                }, use_threads(pairs.size() * W));
 
-                // coefficient of a[i] times phase and factor, formed when first needed
+                // Coefficient of a[i] times every phase and factor.
                 std::vector<Coeff> variants(8 * n1);
-                std::vector<uint8_t> formed(8 * n1, 0);
-                const auto left_coeff = [&](uint32_t i, uint32_t variant) -> const Coeff& {
-                        const size_t slot = 8 * static_cast<size_t>(i) + variant;
-                        if (!formed[slot]) {
-                                Coeff c = a[i].coeff;
-                                if (variant & 1) c *= std::complex<double>(0.0, 1.0);
-                                if (variant & 2) c = -c;
-                                if (variant & 4) c = square ? c * Coeff(2) : c * 2.0;
-                                variants[slot] = std::move(c);
-                                formed[slot] = 1;
+                for_each_index(n1, use_threads(n1 * 64), [&](size_t i) {
+                        for (uint32_t v = 0; v < 8; ++v) {
+                                variants[8 * i + v] = a.coeff(i) * phase_factor(static_cast<int>(v & 3), (v & 4) ? 2.0 : 1.0);
                         }
-                        return variants[slot];
-                };
+                });
                 const auto same_key = [](const Pair& x, const Pair& y) {
-                        for (size_t w = 0; w < 2 * W; ++w) {
-                                if (x.key[w] != y.key[w]) return false;
-                        }
-                        return true;
+                        return std::equal(x.key, x.key + 2 * W, y.key);
                 };
-                size_t operators = 0;
-                for (size_t r = 0; r < pairs.size(); ++r) operators += r == 0 || !same_key(pairs[r - 1], pairs[r]);
-                std::vector<PauliString<Coeff>> terms;
-                terms.reserve(operators);
-                std::vector<Coeff> parts;
-                WordVec x(W), y(W);
-                for (size_t r = 0; r < pairs.size();) {
-                        size_t next = r + 1;
-                        while (next < pairs.size() && same_key(pairs[r], pairs[next])) ++next;
-                        Coeff coeff;
-                        if (next - r == 1) {
-                                coeff = left_coeff(pairs[r].i, pairs[r].variant) * b[pairs[r].j].coeff;
-                        } else {
-                                parts.clear();
-                                for (size_t q = r; q < next; ++q) {
-                                        parts.push_back(left_coeff(pairs[q].i, pairs[q].variant) * b[pairs[q].j].coeff);
-                                }
-                                coeff = Coeff::sum_of(parts.size(), [&](size_t k) -> const Coeff& { return parts[k]; });
-                        }
-                        if (!(next - r == 1 ? coeff_is_zero(coeff) : sum_is_zero(coeff))) {
-                                std::copy(pairs[r].key, pairs[r].key + W, x.data());
-                                std::copy(pairs[r].key + W, pairs[r].key + 2 * W, y.data());
-                                terms.emplace_back(x, y, std::move(coeff));
-                        }
-                        r = next;
+                std::vector<size_t> heads;
+                for (size_t r = 0; r < pairs.size(); ++r) {
+                        if (r == 0 || !same_key(pairs[r - 1], pairs[r])) heads.push_back(r);
                 }
-                return terms;
+                heads.push_back(pairs.size());
+                const size_t groups = heads.size() - 1;
+                std::vector<Coeff> sums(groups);
+                std::vector<char> keep(groups, 0);
+                for_each_index(groups, use_threads(pairs.size() * 16), [&](size_t g) {
+                        const size_t begin = heads[g];
+                        const size_t count = heads[g + 1] - begin;
+                        const auto product = [&](size_t r) {
+                                return variants[8 * pairs[r].i + pairs[r].variant] * b.coeff(pairs[r].j);
+                        };
+                        Coeff acc;
+                        if (count == 1) {
+                                acc = product(begin);
+                        } else {
+                                std::vector<Coeff> parts(count);
+                                for (size_t t = 0; t < count; ++t) parts[t] = product(begin + t);
+                                acc = Coeff::sum_of(count, [&](size_t t) -> const Coeff& { return parts[t]; });
+                        }
+                        if (!acc.is_zero()) {
+                                sums[g] = std::move(acc);
+                                keep[g] = 1;
+                        }
+                });
+                std::vector<size_t> position(groups + 1, 0);
+                for (size_t g = 0; g < groups; ++g) position[g + 1] = position[g] + keep[g];
+                const size_t nw = std::max(wa, wb);
+                Storage out(position[groups], nw);
+                for_each_index(groups, use_threads(groups * (nw + 4)), [&](size_t g) {
+                        if (!keep[g]) return;
+                        const Pair& p = pairs[heads[g]];
+                        out.set_words(position[g], p.key, p.key + W, std::min(nw, W));
+                        out.set_coeff(position[g], std::move(sums[g]));
+                });
+                return out;
+        }
+
+        /// a * b, [a, b] or a * a for strings beyond kMaxSmallKeyWords words: every
+        /// contributing pair becomes one record (product words, coefficient), formed
+        /// on several threads, and the records are merged.
+        static Storage wide_pairs(const Storage& a, const Storage& b, PairKind kind) {
+                using pauliengine_detail::for_each_index;
+                using pauliengine_detail::use_threads;
+                const size_t n1 = a.size();
+                const size_t n2 = b.size();
+                const size_t wa = a.width();
+                const size_t wb = b.width();
+                const size_t nw = std::max(wa, wb);
+                const PairRows rows = pair_rows(a, b, kind);
+                const std::vector<size_t>& offset = rows.offset;
+                const size_t total = offset[n1];
+                Storage records(total, nw);
+                std::vector<Coeff> coeffs(total);
+                for_each_index(n1, use_threads(total * nw), [&](size_t i) {
+                        size_t r = offset[i];
+                        for_each_partner(rows, i, n2, [&](size_t j) {
+                                uint64_t* rx = records.x(r);
+                                uint64_t* ry = records.y(r);
+                                const int k = multiply_symplectic_words(a.x(i), a.y(i), wa, b.x(j), b.y(j), wb, rx, ry);
+                                for (size_t w = std::max(wa, wb); w < nw; ++w) rx[w] = ry[w] = 0;
+                                coeffs[r] = (a.coeff(i) * b.coeff(j)) * phase_factor(k, pair_scale(kind, i, j));
+                                ++r;
+                        });
+                });
+                return merge_symbolic(total, nw, [&](size_t r) {
+                        return OperatorWords{records.x(r), records.y(r), nw};
+                }, coeffs);
         }
 
         /// a * b, or [a, b] if `commutator`, for polynomial coefficients, on flat
@@ -1651,11 +1752,10 @@ class QubitHamiltonian{
         /// records then go through the same parallel sort and merge as complex
         /// Hamiltonians (the monomial sits in the spare last key word, so equal
         /// operators end up adjacent with ascending monomials), and each group of
-        /// equal operators is turned back into one string with a polynomial.
+        /// equal operators becomes one term with a polynomial.
         /// Returns false, leaving `result` alone, if the monomials of the product do
         /// not fit 64 bits or the strings are too wide for fixed-size records.
-        static bool packed_pairs(const std::vector<PauliString<Coeff>>& a, const std::vector<PauliString<Coeff>>& b,
-                                 bool commutator, std::vector<PauliString<Coeff>>& result) {
+        static bool packed_pairs(const Storage& a, const Storage& b, bool commutator, Storage& result) {
                 using pauliengine::symbolic::MonomialPacking;
                 using pauliengine_detail::for_each_index;
                 using pauliengine_detail::use_threads;
@@ -1664,26 +1764,26 @@ class QubitHamiltonian{
                 if (na * nb <= 4) return false;  // not worth the setup
 
                 std::vector<uint32_t> max_a, max_b;
-                for (const auto& ps : a) MonomialPacking::note_exponents(ps.coeff, max_a);
-                for (const auto& ps : b) MonomialPacking::note_exponents(ps.coeff, max_b);
+                for (size_t i = 0; i < na; ++i) MonomialPacking::note_exponents(a.coeff(i), max_a);
+                for (size_t j = 0; j < nb; ++j) MonomialPacking::note_exponents(b.coeff(j), max_b);
                 MonomialPacking packing;
                 if (!packing.init(max_a, max_b)) return false;
 
-                // The terms of all coefficients of one operand: those of string i are
+                // The terms of all coefficients of one operand: those of term i are
                 // [start[i], start[i + 1]).
                 struct Monomials {
                         std::vector<size_t> start;
                         std::vector<uint64_t> word;
                         std::vector<std::complex<double>> coeff;
                 };
-                const auto flatten = [&packing](const std::vector<PauliString<Coeff>>& strings) {
+                const auto flatten = [&packing](const Storage& terms) {
                         Monomials m;
-                        m.start.reserve(strings.size() + 1);
-                        m.word.reserve(strings.size() * 2);
-                        m.coeff.reserve(strings.size() * 2);
-                        for (const auto& ps : strings) {
+                        m.start.reserve(terms.size() + 1);
+                        m.word.reserve(terms.size() * 2);
+                        m.coeff.reserve(terms.size() * 2);
+                        for (size_t i = 0; i < terms.size(); ++i) {
                                 m.start.push_back(m.word.size());
-                                ps.coeff.for_each_term([&](std::complex<double> c, const uint64_t* f, size_t nf) {
+                                terms.coeff(i).for_each_term([&](std::complex<double> c, const uint64_t* f, size_t nf) {
                                         m.word.push_back(packing.pack(f, nf));
                                         m.coeff.push_back(c);
                                 });
@@ -1693,10 +1793,9 @@ class QubitHamiltonian{
                 };
                 const Monomials ma = flatten(a);
                 const Monomials mb = flatten(b);
-                const size_t nw = std::max(widest(a), widest(b));
-                const auto view = [](const PauliString<Coeff>& ps) {
-                        return TermView{ps.x.data(), ps.y.data(), ps.x.size(), std::complex<double>(1.0, 0.0)};
-                };
+                const size_t nw = std::max(a.width(), b.width());
+                const auto view_a = [&](size_t i) { return TermView{a.x(i), a.y(i), a.width(), std::complex<double>(1.0, 0.0)}; };
+                const auto view_b = [&](size_t j) { return TermView{b.x(j), b.y(j), b.width(), std::complex<double>(1.0, 0.0)}; };
 
                 // One word more than the strings need, for the monomial.
                 return with_small_key(nw + 1, [&]<size_t W>() {
@@ -1705,10 +1804,10 @@ class QubitHamiltonian{
                         std::vector<size_t> offset(na + 1, 0);
                         if (commutator) {
                                 for_each_index(na, use_threads(na * nb), [&](size_t i) {
-                                        const TermView left = view(a[i]);
+                                        const TermView left = view_a(i);
                                         size_t partners = 0;
                                         for (size_t j = 0; j < nb; ++j) {
-                                                if (pauliengine_detail::anticommute(left, view(b[j]))) {
+                                                if (pauliengine_detail::anticommute(left, view_b(j))) {
                                                         partners += mb.start[j + 1] - mb.start[j];
                                                 }
                                         }
@@ -1727,11 +1826,11 @@ class QubitHamiltonian{
                         Term* const raw = records.get();
                         const double scale = commutator ? 2.0 : 1.0;
                         for_each_index(na, use_threads(total * W), [&](size_t i) {
-                                const TermView left = view(a[i]);
+                                const TermView left = view_a(i);
                                 Term* write = raw + offset[i];
                                 Term pair;
                                 for (size_t j = 0; j < nb; ++j) {
-                                        const TermView right = view(b[j]);
+                                        const TermView right = view_b(j);
                                         if (commutator && !pauliengine_detail::anticommute(left, right)) continue;
                                         set_keyed_product<W>(pair, left, right, scale);  // operator and scale * i^k
                                         const std::complex<double> phase(pair.re, pair.im);
@@ -1765,146 +1864,19 @@ class QubitHamiltonian{
                         heads.push_back(n);
                         const size_t groups = heads.size() - 1;
 
-                        std::vector<PauliString<Coeff>> out(groups);
+                        // A group holds at least one non-zero monomial, so no term is zero.
+                        Storage out(groups, nw);
                         for_each_index(groups, use_threads(n * 16), [&](size_t g) {
                                 const size_t begin = heads[g];
-                                const uint64_t* const x = merged.x(begin);
-                                const uint64_t* const y = merged.y(begin);
-                                size_t used = nw;
-                                while (used > 0 && x[used - 1] == 0 && y[used - 1] == 0) --used;
-                                PauliString<Coeff>& ps = out[g];
-                                ps.x.assign(x, x + used);
-                                ps.y.assign(y, y + used);
+                                out.set_words(g, merged.x(begin), merged.y(begin), nw);
                                 Coeff c;
                                 for (size_t r = begin; r < heads[g + 1]; ++r) {
                                         packing.append(merged.y(r)[W - 1], merged.coeff(r), c);
                                 }
-                                ps.coeff = std::move(c);
+                                out.set_coeff(g, std::move(c));
                         });
                         result = std::move(out);
                 });
-        }
-
-        void compact_symbolic() {
-                if (store_.empty()) return;
-                if (with_small_key(widest(store_), [this]<size_t W>() { compact_small_key_symbolic<W>(); })) {
-                        return;
-                }
-
-                // sort-based compact. Single-pass ordering: by word
-                // count first (constructors trim trailing zero words, so equal
-                // operators always have equal sizes), then by content.
-                auto op_less = [](const PauliString<Coeff>& a, const PauliString<Coeff>& b) {
-                        const size_t na = a.x.size();
-                        const size_t nb = b.x.size();
-                        if (na != nb) return na < nb;
-                        for (size_t i = 0; i < na; ++i) {
-                                if (a.x[i] != b.x[i]) return a.x[i] < b.x[i];
-                        }
-                        for (size_t i = 0; i < na; ++i) {
-                                if (a.y[i] != b.y[i]) return a.y[i] < b.y[i];
-                        }
-                        return false;
-                };
-                auto op_equal = [](const PauliString<Coeff>& a, const PauliString<Coeff>& b) {
-                        return a.x == b.x && a.y == b.y;
-                };
-
-                // Only for strings wider than kMaxSmallKeyWords words; serial, since the
-                // strings themselves are sorted and have no index to break ties with.
-                std::sort(store_.begin(), store_.end(), op_less);
-
-                size_t write = 0;
-                std::vector<char> merged(store_.size(), 0);
-                for (size_t read = 1; read < store_.size(); ++read) {
-                        if (op_equal(store_[write], store_[read])) {
-                                store_[write].coeff = store_[write].coeff + store_[read].coeff;
-                                merged[write] = 1;
-                        } else {
-                                ++write;
-                                if (write != read) {
-                                        store_[write] = std::move(store_[read]);
-                                }
-                        }
-                }
-                size_t kept = 0;
-                for (size_t r = 0; r <= write; ++r) {
-                        if (merged[r] ? sum_is_zero(store_[r].coeff) : coeff_is_zero(store_[r].coeff)) continue;
-                        if (kept != r) store_[kept] = std::move(store_[r]);
-                        ++kept;
-                }
-                store_.resize(kept);
-        }
-
-        template<size_t W>
-        void compact_small_key_symbolic() {
-                struct Entry {
-                        uint64_t key[2 * W];
-                        uint32_t idx;
-                };
-                using pauliengine_detail::for_each_index;
-                using pauliengine_detail::use_threads;
-                const size_t n = store_.size();
-                std::vector<Entry> entries(n);
-                for_each_index(n, use_threads(n * W), [&](size_t i) {
-                        Entry& e = entries[i];
-                        const PauliString<Coeff>& ps = store_[i];
-                        const size_t nw = ps.x.size();
-                        for (size_t k = 0; k < W; ++k) {
-                                e.key[k]     = (k < nw) ? ps.x[k] : 0;
-                                e.key[W + k] = (k < nw) ? ps.y[k] : 0;
-                        }
-                        e.idx = static_cast<uint32_t>(i);
-                });
-
-                // Ties in input order, so sums add up the same way for any thread count.
-                auto key_less = [](const Entry& a, const Entry& b) {
-                        for (size_t k = 0; k < 2 * W; ++k) {
-                                if (a.key[k] != b.key[k]) return a.key[k] < b.key[k];
-                        }
-                        return a.idx < b.idx;
-                };
-                auto key_equal = [](const Entry& a, const Entry& b) {
-                        for (size_t k = 0; k < 2 * W; ++k) {
-                                if (a.key[k] != b.key[k]) return false;
-                        }
-                        return true;
-                };
-
-                parallel_sort_vec(entries, key_less, use_threads(n));
-
-                // Groups of equal operators: [heads[g], heads[g + 1]).
-                std::vector<size_t> heads;
-                heads.reserve(n + 1);
-                for (size_t i = 0; i < n; ++i) {
-                        if (i == 0 || !key_equal(entries[i - 1], entries[i])) heads.push_back(i);
-                }
-                heads.push_back(n);
-                const size_t n_groups = heads.size() - 1;
-
-                std::vector<PauliString<Coeff>> out(n_groups);
-                std::vector<char> keep(n_groups, 0);
-                for_each_index(n_groups, use_threads(n * 16), [&](size_t g) {
-                        const size_t begin = heads[g];
-                        const size_t count = heads[g + 1] - begin;
-                        Coeff acc = count == 1
-                                ? std::move(store_[entries[begin].idx].coeff)
-                                : Coeff::sum_of(count, [&](size_t t) -> const Coeff& { return store_[entries[begin + t].idx].coeff; });
-                        if (!coeff_is_zero(acc)) {
-                                PauliString<Coeff> ps = std::move(store_[entries[begin].idx]);
-                                ps.coeff = std::move(acc);
-                                out[g] = std::move(ps);
-                                keep[g] = 1;
-                        }
-                });
-                size_t write = 0;
-                for (size_t g = 0; g < n_groups; ++g) {
-                        if (!keep[g]) continue;
-                        if (write != g) out[write] = std::move(out[g]);
-                        ++write;
-                }
-                out.resize(write);
-                store_ = std::move(out);
         }
 
         /// Chunked parallel merge sort if `parallel`, else std::sort. Elements must be

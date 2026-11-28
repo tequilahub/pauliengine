@@ -218,7 +218,7 @@ nb::object finish(SparsePauliString<C> s) {
 
 // Products and commutators (also square and power) are always handed back with
 // bit vectors: they make strings heavier, so their results rarely stay sparse.
-// They are still computed with the sparse kernels when both operands are sparse.
+// They are still computed in the sparse representation when both operands are sparse.
 template <typename T>
 auto dense_result(T value) {
         if constexpr (pauliengine_detail::is_sparse<T>) {
@@ -343,8 +343,8 @@ auto mixed(const A& a, const B& b, Op op) {
 
 // a * b or [a, b] for the bindings, always with bit vectors (see dense_result).
 // A sparse operand next to a Pauli string or Hamiltonian with bit vectors is
-// converted first, so the dense kernels do the work; next to cycles, orbits and
-// other sparse operators the sparse kernels run and only the result is converted.
+// converted first, so the bit-vector algorithms do the work; next to cycles, orbits
+// and other sparse operators the sparse algorithms run and only the result is converted.
 template <typename A, typename B, typename Op>
 auto product_like(const A& a, const B& b, Op op) {
         using namespace pauliengine_detail;

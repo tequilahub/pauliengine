@@ -258,7 +258,7 @@ class unweighted_QubitHamiltonian {
                         using pauliengine_detail::PrefixPartitionedProduct;
                         const size_t n1 = size();
                         const size_t n2 = other.size();
-                        // The kernel forms a commutator only where a fair share of the pairs
+                        // The product forms a commutator only where a fair share of the pairs
                         // anti-commute, judged as for QubitHamiltonian by a grid of pairs.
                         if (anti_commuting_only) {
                                 const size_t side = n1 * n2 >= 65536 ? 32 : 16;

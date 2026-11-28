@@ -332,8 +332,6 @@ template <typename Coeff, size_t Inline = 4>
 class SparseAccumulator {
         using SiteKey = pauliengine_detail::SiteKey<Inline>;
     public:
-        static constexpr bool kParallelCoeff = std::is_same_v<Coeff, std::complex<double>>;
-
         /// Emitted terms per block, summed over all threads.
         static constexpr size_t kBlockTerms = size_t{1} << 19;
 
@@ -378,7 +376,7 @@ class SparseAccumulator {
                 const double expected = static_cast<double>(rows) * static_cast<double>(std::max<size_t>(terms_per_row, 1));
                 unsigned bits = 0;
                 while (bits < 12 && expected > static_cast<double>(size_t{4096} << bits)) ++bits;
-                const bool parallel = kParallelCoeff && use_threads(rows * std::max<size_t>(work_per_row, 1));
+                const bool parallel = use_threads(rows * std::max<size_t>(work_per_row, 1));
                 int threads = 1;
 #ifdef PAULIENGINE_HAS_OPENMP
                 if (parallel) threads = omp_get_max_threads();
